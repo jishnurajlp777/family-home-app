@@ -1,77 +1,62 @@
-# 🏡 Family Home - Full-Stack React + TypeScript & SQLite
+# 🏡 Family Home - Full-Stack React + TypeScript & MySQL
 
-A modern, scalable multi-page application built with **React**, **TypeScript**, **Vite**, and **Node.js** with built-in native **SQLite** (`server/family.db`).
+A private, collaborative family dashboard and mobile application built with **React 18**, **TypeScript**, **Vite**, **Capacitor (Android APK)**, and **Node.js** backed by **MySQL**.
 
 ---
 
-## ✨ Features & Architecture
+## 📖 Documentation
+* **[Software Requirements Specification (SRS)](./docs/SRS.md)** — Complete module-wise requirements, RBAC matrix, and technical specs.
+* **[MySQL Database Schema](./server/schema.sql)** — Database tables, constraints, and default family seed data.
 
-* **Multi-Page Experience**: Selecting a family member from the dropdown or quick-tap avatars opens their **dedicated profile page** with full URL hash routing (`#member/:id`) and browser Back/Forward button support.
-* **Modern Aesthetic**:
-  - Interactive cartoon home illustration with chimney smoke and ambient floating animations.
-  - Member showcase cards with personalized color themes matching each caricature style.
-  - Interactive tabs: **About & Highlights**, **My Room Sanctuary**, and **Family Motto**.
-  - Quick-switch family strip at the bottom of each member's page.
-* **Strict Type Safety (`src/types/member.ts`)**: Strongly typed data contracts for all family members, inputs, and avatars.
-* **Decoupled Service Layer (`src/services/api.ts`)**: Communicates with the SQLite server (`family.db`) with automatic `localStorage` offline fallback.
-* **1-Click Modal Manager**: Add new family members, edit existing details, delete records, export the entire database as a JSON file, or restore seeds.
+---
+
+## ✨ Features & Modules
+
+* **Passwordless Mobile Login**: Secure access via registered mobile numbers with Admin master code (`2000`).
+* **Interactive Home Layout**: Visual cartoon home interface with clickable rooms for each family member.
+* **Personal Room Sanctuaries**: Each member can manage their bio, daily status, personal scratchpad notes, and interactive to-do checklist.
+* **Live Family Geolocation Map**: Real-time family member locations rendered with caricature pins using the Geolocation API.
+* **Family Photo Memory Gallery**: Upload, browse, and manage shared family memories with lightbox previews.
+* **Safe Member Management**: Full CRUD operations for family members with safety guards (minimum 1 member constraint).
+* **Cross-Platform Delivery**: Runs on web browsers (desktop and mobile) and compiles to a native Android APK (`FamilyHome.apk`).
+* **Offline-First Resilience**: Transparent fallback to local browser cache whenever the backend or network is offline.
 
 ---
 
 ## 📁 Project Directory Structure
 
 ```
-E:\my ai projects\family\
-├── package.json              <-- Scripts, dependencies & metadata
-├── tsconfig.json             <-- TypeScript strict compiler configuration
-├── vite.config.ts            <-- Vite configuration with API proxy
-├── index.html                <-- HTML entry point
-├── start_dev.bat             <-- 1-Click development launcher
-├── start_server.bat          <-- 1-Click production SQLite server launcher
-├── README.md                 <-- Full documentation
+home project--/
+├── docs/
+│   └── SRS.md                    <-- Software Requirements Specification (Full Requirements)
 │
-├── server/                   <-- Backend Server Layer
-│   ├── server.js             <-- REST API (Node.js native node:sqlite DatabaseSync)
-│   └── family.db             <-- Persistent SQLite database file
+├── server/                       <-- Backend API Server Layer
+│   ├── server.js                 <-- Node.js REST API with mysql2 connection pool
+│   ├── schema.sql                <-- MySQL schema & initial seed data
+│   ├── .env                      <-- Active environment variables
+│   ├── .env.development          <-- Local developer machine configuration
+│   └── .env.production           <-- Live cloud configuration template
 │
-└── src/                      <-- Frontend TypeScript Application
-    ├── main.tsx              <-- React 18 DOM mount point
-    ├── App.tsx               <-- Root app & URL hash router (Home vs Member page)
-    ├── index.css             <-- Animations (smoke puff, float, pageSlideIn, wiggle)
-    │
-    ├── types/
-    │   └── member.ts         <-- FamilyMember, CaricatureType, Input types
-    │
-    ├── services/
-    │   └── api.ts            <-- FamilyService (SQLite REST API + localStorage)
-    │
-    └── components/
-        ├── HomePage.tsx      <-- Front page with Cartoon Home, Dropdown & Avatar bubbles
-        ├── MemberPage.tsx    <-- Dedicated full member page with hero banner & tabs
-        ├── CartoonHome.tsx   <-- Cartoon house illustration with smoke animation
-        ├── Caricature.tsx    <-- Dynamic SVG avatar renderer for all caricatures
-        ├── ManageModal.tsx   <-- Unified modal (Add, Edit, Delete, Export JSON, Reset)
-        └── Toast.tsx         <-- Notification toast feedback
+├── src/                          <-- Frontend TypeScript Application
+│   ├── main.tsx                  <-- React DOM mount point
+│   ├── App.tsx                   <-- Root routing & authentication state
+│   ├── types/                    <-- TypeScript interfaces (FamilyMember, AuthUser, Gallery)
+│   ├── services/api.ts           <-- REST API client with local cache fallback
+│   └── components/               <-- UI Modules (Home, Rooms, Map, Gallery, Modals)
+│
+├── android/                      <-- Capacitor Android Native Project
+├── start_dev.bat                 <-- 1-Click local development launcher
+├── build_apk.bat                 <-- 1-Click Android APK build pipeline
+├── push_to_github.bat            <-- 1-Click Git commit & push script
+└── README.md                     <-- Project documentation overview
 ```
 
 ---
 
-## 🚀 How to Run the App
+## 🚀 Quick Start (Local Developer Machine)
 
-### Option A: 1-Click Dev Mode (Recommended)
-Double-click [`start_dev.bat`](file:///E:/my%20ai%20projects/family/start_dev.bat) to launch both the SQLite backend (port 3000) and the hot-reloading Vite frontend (port 5173).
-
-### Option B: From the Terminal
-```bash
-# 1. Start SQLite Backend
-node server/server.js
-
-# 2. In another terminal, start Vite frontend
-npm run dev
-```
-
-### Option C: Production Build
-```bash
-npm run build
-```
-*(Verified: `tsc && vite build` compiles with **0 errors**).*
+1. Double-click **`start_dev.bat`** to start:
+   * **Node.js API Server:** `http://localhost:3000`
+   * **Vite Web Frontend:** `http://localhost:5173`
+2. To compile the Android APK:
+   * Double-click **`build_apk.bat`** (generates `FamilyHome.apk`).
