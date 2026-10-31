@@ -26,7 +26,7 @@ export const DeleteMemberModal: React.FC<DeleteMemberModalProps> = ({
     try {
       await onDelete(memberToDelete.id);
       setMemberToDelete(null);
-      if (members.length <= 2) {
+      if (members.length <= 1) {
         onClose();
       }
     } finally {
@@ -59,14 +59,14 @@ export const DeleteMemberModal: React.FC<DeleteMemberModalProps> = ({
 
           {/* Members List */}
           <div className="mt-4 space-y-2.5 overflow-y-auto flex-1 pr-1">
-            {members.length <= 1 ? (
-              <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-center">
-                <span className="text-2xl block mb-1">⚠️</span>
-                <p className="text-xs font-bold text-amber-800">
-                  Cannot delete the only family member!
+            {members.length === 0 ? (
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center">
+                <span className="text-2xl block mb-1">🏡</span>
+                <p className="text-xs font-bold text-slate-700">
+                  No family members registered yet.
                 </p>
-                <p className="text-[11px] text-amber-600 mt-1">
-                  Our Home requires at least one cherished family member record.
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Add members from the home dashboard using '+ Add Member'.
                 </p>
               </div>
             ) : (

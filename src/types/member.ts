@@ -69,6 +69,7 @@ export interface GalleryItem {
   image_data: string;
   title?: string;
   uploaded_by?: string;
+  uploaded_by_id?: string;
   created_at: string;
 }
 

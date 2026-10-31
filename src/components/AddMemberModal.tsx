@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
-import { CaricatureType, NewMemberInput } from '../types/member';
+import { CaricatureType, NewMemberInput, FamilyMember } from '../types/member';
 import { Caricature } from './Caricature';
 
 interface AddMemberModalProps {
   isOpen: boolean;
   onClose: () => void;
+  existingMembers?: FamilyMember[];
   onAdd: (data: NewMemberInput) => Promise<void>;
 }
 
 const CARICATURE_OPTIONS: { key: CaricatureType; label: string }[] = [
   { key: 'boy', label: 'Young Boy' },
   { key: 'girl', label: 'Young Girl' },
-  { key: 'jishnu', label: 'Jishnu' },
-  { key: 'ashna', label: 'Ashna' },
-  { key: 'raju', label: 'Raju' },
-  { key: 'lalitha', label: 'Lalitha' },
+  { key: 'jishnu', label: 'Modern Geek' },
+  { key: 'ashna', label: 'Creative Artist' },
+  { key: 'raju', label: 'Wise Elder' },
+  { key: 'lalitha', label: 'Master Chef' },
   { key: 'elder', label: 'Grandparent' },
   { key: 'pet', label: 'Family Pet' },
 ];
@@ -22,6 +23,7 @@ const CARICATURE_OPTIONS: { key: CaricatureType; label: string }[] = [
 export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   isOpen,
   onClose,
+  existingMembers = [],
   onAdd,
 }) => {
   const [name, setName] = useState('');
@@ -78,6 +80,14 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
     }
     if (cleanPhone === '2000') {
       setError('Mobile number "2000" is reserved for Admin login. Please enter a different number.');
+      return;
+    }
+
+    const isDuplicate = existingMembers.some(
+      (m) => String(m.mobile_number || '').trim() === cleanPhone
+    );
+    if (isDuplicate) {
+      setError('This mobile number is already registered to another family member.');
       return;
     }
 

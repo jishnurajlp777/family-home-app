@@ -1,58 +1,74 @@
 import React, { useState, useEffect } from 'react';
-import { FamilyMember } from '../types/member';
+import { FamilyMember, AuthUser } from '../types/member';
 import { Caricature } from './Caricature';
 
 interface MembersMapProps {
   members: FamilyMember[];
+  currentUser?: AuthUser;
   onSelectMember: (id: string) => void;
+  onUpdateLocation?: (lat: number, lng: number, placeName?: string) => Promise<void>;
 }
 
-export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember }) => {
+export const MembersMap: React.FC<MembersMapProps> = ({
+  members,
+  currentUser: _currentUser,
+  onSelectMember,
+  onUpdateLocation,
+}) => {
   const [selectedPinMemberId, setSelectedPinMemberId] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
   const [liveLocation, setLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isDetecting, setIsDetecting] = useState<boolean>(false);
   const [activeView, setActiveView] = useState<'google' | 'radar'>('google');
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
-  // Request browser live geolocation
-  const detectLiveLocation = () => {
+  // Request browser live geolocation and optionally sync to profile
+  const detectLiveLocation = (syncToDatabase: boolean = false) => {
     if (!navigator.geolocation) {
+      setSyncStatus('Geolocation not supported by device');
       return;
     }
 
     setIsDetecting(true);
+    setSyncStatus('Detecting GPS satellite coordinates...');
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude } = position.coords;
         setLiveLocation({ lat: latitude, lng: longitude });
         setIsDetecting(false);
+        setSyncStatus('Live GPS coordinates acquired');
+
+        if (syncToDatabase && onUpdateLocation) {
+          try {
+            await onUpdateLocation(latitude, longitude, 'Live Current Area');
+            setSyncStatus('📍 Live location shared with family!');
+            setTimeout(() => setSyncStatus(null), 4000);
+          } catch {
+            setSyncStatus('Could not save live location.');
+          }
+        } else {
+          setTimeout(() => setSyncStatus(null), 3000);
+        }
       },
       (error) => {
         setIsDetecting(false);
-        console.warn('Geolocation error:', error.message);
-        // Fallback default coordinates (e.g. Bangalore center or default)
+        setSyncStatus(`GPS error: ${error.message}`);
+        setTimeout(() => setSyncStatus(null), 4000);
+        // Fallback default coordinates
         setLiveLocation({ lat: 12.9716, lng: 77.5946 });
       },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
     );
   };
 
   useEffect(() => {
-    detectLiveLocation();
+    detectLiveLocation(false);
   }, []);
-
-  // Visual offsets for artistic radar view
-  const PIN_POSITIONS: Record<string, { x: number; y: number; color: string }> = {
-    mem_jishnu: { x: 28, y: 35, color: '#3b82f6' },
-    mem_ashna: { x: 74, y: 30, color: '#ec4899' },
-    mem_raju: { x: 36, y: 72, color: '#10b981' },
-    mem_lalitha: { x: 68, y: 68, color: '#f59e0b' },
-  };
 
   const selectedMember = members.find((m) => m.id === selectedPinMemberId) || null;
 
-  // Active target coordinates (either selected member or user live location)
+  // Active target coordinates: selected member -> current user GPS -> fallback
   const currentLat = selectedMember?.location?.lat || liveLocation?.lat || 12.9716;
   const currentLng = selectedMember?.location?.lng || liveLocation?.lng || 77.5946;
 
@@ -63,7 +79,7 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
   return (
     <div className="w-full">
       {/* Map Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 px-1 gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 px-1 gap-2.5">
         <div className="flex items-center gap-2">
           <span className="text-xl">🗺️</span>
           <div>
@@ -72,12 +88,26 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
             </h3>
             <p className="text-[11px] text-slate-400 font-medium">
-              Real-time family location tracking
+              Real-time GPS tracking across all family members
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-2">
+          {/* Share / Update GPS Button */}
+          {onUpdateLocation && (
+            <button
+              type="button"
+              onClick={() => detectLiveLocation(true)}
+              disabled={isDetecting}
+              className="text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition shadow-2xs flex items-center gap-1 active:scale-95 disabled:opacity-50"
+              title="Detect and broadcast your current live GPS position"
+            >
+              <span>{isDetecting ? '📡' : '📍'}</span>
+              <span>{isDetecting ? 'Locating...' : 'Update My Location'}</span>
+            </button>
+          )}
+
           {/* View switcher */}
           <div className="inline-flex rounded-xl bg-slate-100 p-0.5 border border-slate-200 text-[11px] font-bold">
             <button
@@ -108,9 +138,9 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
             type="button"
             onClick={() => handleOpenGoogleMaps(currentLat, currentLng)}
             className="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl transition shadow-2xs flex items-center gap-1 active:scale-95"
-            title="Open in external Google Maps"
+            title="Open coordinates in Google Maps"
           >
-            <span>Open Google Maps</span>
+            <span>Open Maps</span>
             <span>↗</span>
           </button>
 
@@ -123,6 +153,13 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
           </button>
         </div>
       </div>
+
+      {syncStatus && (
+        <div className="mb-2 text-xs font-bold px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-800 animate-fadeIn flex items-center gap-2">
+          <span>📡</span>
+          <span>{syncStatus}</span>
+        </div>
+      )}
 
       {isExpanded && (
         <div className="relative rounded-2xl overflow-hidden border-2 border-indigo-100 bg-slate-900 shadow-md">
@@ -141,15 +178,15 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
               <div className="absolute top-3 left-3 bg-white/95 backdrop-blur-md rounded-xl shadow-md border border-slate-200 px-3 py-1.5 flex items-center gap-2 text-xs font-bold text-slate-800 z-10">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 <span>
-                  Live GPS: {currentLat.toFixed(4)}°, {currentLng.toFixed(4)}°
+                  {selectedMember ? `${selectedMember.name}'s Location` : 'Your Live GPS'}: {currentLat.toFixed(4)}°, {currentLng.toFixed(4)}°
                 </span>
                 <button
                   type="button"
-                  onClick={detectLiveLocation}
+                  onClick={() => detectLiveLocation(false)}
                   disabled={isDetecting}
                   className="ml-1 text-[11px] text-indigo-600 hover:text-indigo-800 font-extrabold underline disabled:opacity-50"
                 >
-                  {isDetecting ? 'Refreshing...' : 'Refresh'}
+                  {isDetecting ? '...' : 'Refresh'}
                 </button>
               </div>
 
@@ -164,7 +201,7 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
                       : 'bg-white/95 text-slate-700 hover:bg-white'
                   }`}
                 >
-                  📍 My Live Location
+                  📍 My Live GPS
                 </button>
                 {members.map((m) => (
                   <button
@@ -179,12 +216,13 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
                   >
                     <span>👤</span>
                     <span>{m.name}</span>
+                    {m.location && <span className="text-[10px] opacity-75">📍</span>}
                   </button>
                 ))}
               </div>
             </div>
           ) : (
-            /* Family Radar Cartoon Layout */
+            /* Family Radar Layout */
             <div className="relative w-full h-72 sm:h-80 bg-[#e5e9ec] overflow-hidden select-none">
               <svg viewBox="0 0 400 240" className="w-full h-full object-cover opacity-90">
                 <rect width="400" height="240" fill="#f1f5f9" />
@@ -201,7 +239,7 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
                 <path d="M 0 180 Q 200 190 400 170" stroke="#ffffff" strokeWidth="6" />
               </svg>
 
-              {/* Live Location Marker for Current User */}
+              {/* Live Location Marker for Current Device */}
               {liveLocation && (
                 <div
                   style={{ left: '50%', top: '50%' }}
@@ -218,28 +256,20 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
               )}
 
               {/* Member Pins */}
-              {members.map((m) => {
-                const pos = PIN_POSITIONS[m.id] || {
-                  x: 25 + ((m.name.length * 19) % 55),
-                  y: 25 + ((m.name.length * 27) % 50),
-                  color: '#6366f1',
-                };
+              {members.map((m, idx) => {
+                const posX = 20 + ((idx * 27 + (m.name.charCodeAt(0) || 0) * 11) % 60);
+                const posY = 20 + ((idx * 31 + (m.name.charCodeAt(1) || 0) * 13) % 55);
                 const isSelected = selectedPinMemberId === m.id;
 
                 return (
                   <div
                     key={m.id}
-                    style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                    style={{ left: `${posX}%`, top: `${posY}%` }}
                     onClick={() => setSelectedPinMemberId(isSelected ? null : m.id)}
                     className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group"
                   >
-                    <span
-                      style={{ borderColor: pos.color }}
-                      className="absolute -inset-1.5 rounded-full border-2 animate-ping opacity-75"
-                    />
                     <div
-                      style={{ borderColor: pos.color }}
-                      className={`relative w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white p-0.5 border-2 shadow-md flex items-center justify-center transition-transform duration-200 group-hover:scale-125 ${
+                      className={`relative w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white p-0.5 border-2 border-indigo-500 shadow-md flex items-center justify-center transition-transform duration-200 group-hover:scale-125 ${
                         isSelected ? 'scale-125 ring-4 ring-indigo-300' : ''
                       }`}
                     >
@@ -265,12 +295,12 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-900">{selectedMember.name}</span>
                     <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded-full">
-                      {selectedMember.location?.status || 'Active'}
+                      {selectedMember.location?.status || 'Active GPS'}
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-600 truncate flex items-center gap-1">
                     <span>📍</span>
-                    <span>{selectedMember.location?.name || 'Current Location'}</span>
+                    <span>{selectedMember.location?.name || selectedMember.location?.address || 'Current Live Area'}</span>
                     <span className="text-slate-400">({selectedMember.location?.updated_at || 'Recently'})</span>
                   </div>
                 </div>
@@ -302,9 +332,9 @@ export const MembersMap: React.FC<MembersMapProps> = ({ members, onSelectMember 
             </div>
           )}
 
-          {/* Map Footer integration notice */}
+          {/* Map Footer info */}
           <div className="bg-slate-50 px-3 py-1.5 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-500 font-medium">
-            <span>🗺️ Google Maps Live Navigation</span>
+            <span>🗺️ Google Maps Live Location Viewer</span>
             <button
               type="button"
               onClick={() => handleOpenGoogleMaps(currentLat, currentLng)}

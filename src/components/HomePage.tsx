@@ -1,11 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { FamilyMember, AuthUser } from '../types/member';
 import { CartoonHome } from './CartoonHome';
 import { Caricature } from './Caricature';
 import { MembersMap } from './MembersMap';
 import { FamilyGallery } from './FamilyGallery';
-import { DatabaseSettingsModal } from './DatabaseSettingsModal';
-import { FamilyService } from '../services/api';
 
 interface HomePageProps {
   members: FamilyMember[];
@@ -17,6 +15,7 @@ interface HomePageProps {
   onLogout: () => void;
   onShowToast: (message: string, type?: 'success' | 'error') => void;
   onRefresh?: () => void;
+  onUpdateLocation?: (lat: number, lng: number, placeName?: string) => Promise<void>;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
@@ -28,10 +27,9 @@ export const HomePage: React.FC<HomePageProps> = ({
   onOpenEditMember,
   onLogout,
   onShowToast,
-  onRefresh,
+  onRefresh: _onRefresh,
+  onUpdateLocation,
 }) => {
-  const [isDbSettingsOpen, setIsDbSettingsOpen] = useState(false);
-  const isDbConnected = FamilyService.isConnectedToServer();
   const isAdmin = currentUser.role === 'admin';
 
   const handleMemberCardClick = (member: FamilyMember) => {
@@ -58,9 +56,6 @@ export const HomePage: React.FC<HomePageProps> = ({
             <h1 className="text-sm sm:text-base font-extrabold text-slate-800 tracking-tight">
               Our Family Home
             </h1>
-            <p className="text-[11px] text-slate-400 font-medium">
-              Interactive Full-Page Dashboard & Mobile-Ready App
-            </p>
           </div>
         </div>
 
@@ -82,20 +77,6 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={() => setIsDbSettingsOpen(true)}
-            className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition shadow-2xs active:scale-95 ${
-              isDbConnected
-                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
-                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-            }`}
-            title="Manage Database & Backend Server Connection"
-          >
-            <span>{isDbConnected ? '🟢' : '🗄️'}</span>
-            <span className="hidden sm:inline">{isDbConnected ? 'Database Live' : 'DB / Server'}</span>
-          </button>
 
           <button
             type="button"
@@ -121,14 +102,10 @@ export const HomePage: React.FC<HomePageProps> = ({
             <CartoonHome />
 
             {/* Quick Family Highlights */}
-            <div className="mt-5 pt-5 border-t border-slate-100 grid grid-cols-2 gap-2 text-center">
-              <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100">
+            <div className="mt-5 pt-5 border-t border-slate-100 flex justify-center">
+              <div className="bg-slate-50 py-2.5 px-6 rounded-2xl border border-slate-100 text-center min-w-[130px]">
                 <span className="text-base font-extrabold text-indigo-600 block">{members.length}</span>
                 <span className="text-[10px] text-slate-400 font-bold uppercase">Members</span>
-              </div>
-              <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100">
-                <span className="text-base font-extrabold text-emerald-600 block">4</span>
-                <span className="text-[10px] text-slate-400 font-bold uppercase">Rooms</span>
               </div>
             </div>
 
@@ -141,6 +118,8 @@ export const HomePage: React.FC<HomePageProps> = ({
           {/* Family Gallery Tile (Moved below Our Home tile as requested) */}
           <FamilyGallery
             currentUserName={currentUser.name}
+            currentUserRole={currentUser.role}
+            currentUserId={currentUser.role === 'admin' ? 'admin' : (currentUser.memberId || currentUser.member?.id)}
             onShowToast={onShowToast}
           />
         </div>
@@ -159,22 +138,24 @@ export const HomePage: React.FC<HomePageProps> = ({
                   </h2>
                 </div>
                 <p className="text-xs text-slate-400 font-semibold mt-0.5">
-                  {isAdmin ? 'Tap to open profile (Admin Access)' : 'Tap your card to view your profile'}
+                  Tap to open profile
                 </p>
               </div>
 
-              {/* Add Member control (Admin only, above members list right side) */}
+              {/* Add Member control (Admin only) */}
               {isAdmin ? (
-                <button
-                  type="button"
-                  onClick={onOpenAddMember}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3.5 py-2 rounded-xl shadow-xs transition-all active:scale-95"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
-                  </svg>
-                  <span>Add Member</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={onOpenAddMember}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3.5 py-2 rounded-xl shadow-xs transition-all active:scale-95"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>Add Member</span>
+                  </button>
+                </div>
               ) : (
                 <span className="text-xs text-indigo-700 font-bold bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl">
                   👤 Logged in as {currentUser.name}
@@ -183,8 +164,29 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
 
             {/* Member Cards Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-              {members.map((m) => {
+            {members.length === 0 ? (
+              <div className="py-10 px-4 text-center bg-slate-50/70 border border-dashed border-slate-300 rounded-3xl space-y-3">
+                <span className="text-4xl block">🏡</span>
+                <h4 className="text-sm font-extrabold text-slate-800">No Family Members Registered Yet</h4>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  {isAdmin
+                    ? 'As Admin, click "+ Add Member" to register your family members with their phone numbers.'
+                    : 'Please contact the Admin (2000) to register your family member profile.'}
+                </p>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={onOpenAddMember}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition active:scale-95"
+                  >
+                    <span>+</span>
+                    <span>Add First Member</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                {members.map((m) => {
                 const isOwnProfile = !isAdmin && (currentUser.memberId === m.id || currentUser.mobile_number === m.mobile_number);
                 const isRestricted = !isAdmin && !isOwnProfile;
 
@@ -263,12 +265,15 @@ export const HomePage: React.FC<HomePageProps> = ({
                 );
               })}
             </div>
+          )}
           </div>
 
           {/* Members Live Map (Visible to all members and admin) */}
           <div className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-3xl shadow-xl p-6 sm:p-7">
             <MembersMap
               members={members}
+              currentUser={currentUser}
+              onUpdateLocation={onUpdateLocation}
               onSelectMember={(id) => {
                 if (isAdmin) {
                   onSelectMember(id);
@@ -281,16 +286,6 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Database & Server Settings Modal */}
-      <DatabaseSettingsModal
-        isOpen={isDbSettingsOpen}
-        onClose={() => setIsDbSettingsOpen(false)}
-        onConfigSaved={() => {
-          if (onRefresh) onRefresh();
-          onShowToast('Database connection settings saved!', 'success');
-        }}
-      />
     </div>
   );
 };

@@ -57,9 +57,6 @@
           <h1 class="text-sm sm:text-base font-extrabold text-[var(--foreground)] tracking-tight">
             Our Family Home
           </h1>
-          <p class="text-xs text-[var(--muted-foreground)] hidden sm:block">
-            Full-Page Dashboard (Desktop & Mobile-Ready)
-          </p>
         </div>
       </div>
 
@@ -142,14 +139,10 @@
             <span class="text-xs text-[var(--muted-foreground)] font-medium">Click home to spin 🔄</span>
 
             <!-- Quick Stats -->
-            <div class="mt-4 pt-4 border-t border-[var(--border)] grid grid-cols-3 gap-2">
+            <div class="mt-4 pt-4 border-t border-[var(--border)] grid grid-cols-2 gap-2">
               <div class="bg-[var(--background)] p-2 rounded-xl border border-[var(--border)]">
-                <span id="homeStatMembers" class="text-sm font-extrabold text-indigo-600 block">4</span>
+                <span id="homeStatMembers" class="text-sm font-extrabold text-indigo-600 block">0</span>
                 <span class="text-[10px] text-[var(--muted-foreground)] font-bold uppercase">Members</span>
-              </div>
-              <div class="bg-[var(--background)] p-2 rounded-xl border border-[var(--border)]">
-                <span class="text-sm font-extrabold text-emerald-600 block">4</span>
-                <span class="text-[10px] text-[var(--muted-foreground)] font-bold uppercase">Rooms</span>
               </div>
               <div class="bg-[var(--background)] p-2 rounded-xl border border-[var(--border)]">
                 <span class="text-sm font-extrabold text-rose-500 block">Live</span>
@@ -902,142 +895,42 @@
       pet: `<svg viewBox="0 0 100 100" class="w-full h-full drop-shadow"><path d="M 22 30 C 15 45, 18 62, 28 55 Z" fill="#78350f"/><path d="M 78 30 C 85 45, 82 62, 72 55 Z" fill="#78350f"/><circle cx="50" cy="54" r="27" fill="#d97706"/><ellipse cx="50" cy="62" rx="16" ry="12" fill="#fef3c7"/><circle cx="40" cy="48" r="4" fill="#1e293b"/><circle cx="60" cy="48" r="4" fill="#1e293b"/><path d="M 47 67 Q 50 73 53 67" stroke="#1e293b" stroke-width="1.5" fill="none"/><path d="M 32 82 C 40 86, 60 86, 68 82" stroke="#dc2626" stroke-width="4.5" stroke-linecap="round" fill="none"/></svg>`
     };
 
-    const DEFAULT_MEMBERS = [
-      {
-        id: "mem_jishnu",
-        name: "Jishnu",
-        mobile_number: "9876543210",
-        caricature_key: "jishnu",
-        image_url: "",
-        role: "Tech Explorer",
-        bio: "Curious tech explorer, loves coding cool tools, gaming, and late night coffee brews.",
-        tags: ["💻 Tech Lover", "☕ Coffee Fan", "🎮 Gamer"],
-        room_title: "Jishnu's Tech Den",
-        room_desc: "Dual-monitor setup with warm ambient strip lighting, mechanical keyboards, and a comfy beanbag.",
-        room_notes: "Clean mechanical keyboards and arrange cables under the desk.",
-        checklist: [
-          { id: "c1", text: "Clean dual monitors", completed: true },
-          { id: "c2", text: "Water the desk succulent", completed: false }
-        ],
-        location: {
-          name: "Tech Innovation Hub, Cyber Park",
-          address: "Tower B, Silicon Boulevard",
-          lat: 12.9716,
-          lng: 77.5946,
-          mapX: 28,
-          mapY: 34
-        },
-        quote: "Keep creating, keep questioning, and never stop building awesome things!"
-      },
-      {
-        id: "mem_ashna",
-        name: "Ashna",
-        mobile_number: "9876543211",
-        caricature_key: "ashna",
-        image_url: "",
-        role: "Creative Artist",
-        bio: "Creative mind, loves painting, cozy playlists, sweet treats, and family weekend trips.",
-        tags: ["🎨 Creative Artist", "🎵 Music Lover", "🧁 Baker"],
-        room_title: "Ashna's Art Haven",
-        room_desc: "Sunlit room with fairy lights, watercolor sketches pinned on walls, and potted succulents.",
-        room_notes: "Buy pastel watercolor sheets and fairy light batteries.",
-        checklist: [
-          { id: "c3", text: "Organize paint brushes", completed: true },
-          { id: "c4", text: "Frame sunset sketch", completed: false }
-        ],
-        location: {
-          name: "Creative Art Studio & Cafe",
-          address: "42 Pastel Boulevard, Arts District",
-          lat: 12.9780,
-          lng: 77.6010,
-          mapX: 72,
-          mapY: 26
-        },
-        quote: "Add a splash of color to everyday moments."
-      },
-      {
-        id: "mem_raju",
-        name: "Raju",
-        mobile_number: "9876543212",
-        caricature_key: "raju",
-        image_url: "",
-        role: "Family Pillar & Reader",
-        bio: "The family pillar! Enjoys morning newspaper walkabouts, gardening, and classic stories.",
-        tags: ["🌿 Green Thumb", "📰 Avid Reader", "🛠️ Master Fixer"],
-        room_title: "Raju's Study & Garden Porch",
-        room_desc: "Comfortable rocking chair and vintage bookshelf overlooking the green front yard.",
-        room_notes: "Check the jasmine saplings in the front balcony and trim dry leaves.",
-        checklist: [
-          { id: "c5", text: "Read morning journal", completed: true },
-          { id: "c6", text: "Water garden ferns", completed: true }
-        ],
-        location: {
-          name: "Greenfield Botanical Gardens",
-          address: "Lake Road, North Gate",
-          lat: 12.9650,
-          lng: 77.5850,
-          mapX: 42,
-          mapY: 76
-        },
-        quote: "Patience and hard work always bear the sweetest fruits."
-      },
-      {
-        id: "mem_lalitha",
-        name: "Lalitha",
-        mobile_number: "9876543213",
-        caricature_key: "lalitha",
-        image_url: "",
-        role: "Heart of Home & Chef",
-        bio: "The warm heart of the home. Master of delicious feasts, kindness, and keeping everyone connected.",
-        tags: ["🍲 Master Chef", "🌸 Joy Spreader", "❤️ Heart of Home"],
-        room_title: "Lalitha's Cozy Sanctuary",
-        room_desc: "Filled with family photo albums, soft handcrafted cushions, and aroma of sweet cardamom.",
-        room_notes: "Grandma's recipe notebook kept safely on the second wooden shelf.",
-        checklist: [
-          { id: "c7", text: "Bake cardamom cookies for evening tea", completed: true },
-          { id: "c8", text: "Call Aunt Sarah for weekend dinner", completed: false }
-        ],
-        location: {
-          name: "Our Sweet Home Kitchen",
-          address: "22 Blossom Lane, Green Valley",
-          lat: 12.9700,
-          lng: 77.5900,
-          mapX: 62,
-          mapY: 60
-        },
-        quote: "A happy family is an earlier heaven."
-      }
-    ];
+    const DEFAULT_MEMBERS = [];
+
+    // Aggressive cleanup: purge legacy keys so no legacy members (like Jishnu) persist in browser
+    try {
+      window.localStorage.removeItem('family_members_v3');
+      window.localStorage.removeItem('family_members_v2');
+      window.localStorage.removeItem('family_members');
+    } catch (e) {}
 
     let memoryStorage = null;
     function safeLoadMembers() {
       if (memoryStorage) return memoryStorage;
       try {
-        const raw = window.localStorage.getItem('family_members_v3');
+        const raw = window.localStorage.getItem('family_members_v4_clean');
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            parsed.forEach((m, idx) => {
-              if (!m.mobile_number) m.mobile_number = ["9876543210", "9876543211", "9876543212", "9876543213"][idx] || "9876543214";
-            });
-            memoryStorage = parsed;
-            return parsed;
+          if (Array.isArray(parsed)) {
+            const clean = parsed.filter(m => !['mem_jishnu', 'mem_ashna', 'mem_raju', 'mem_lalitha'].includes(m.id));
+            memoryStorage = clean;
+            return clean;
           }
         }
       } catch (e) {}
-      memoryStorage = JSON.parse(JSON.stringify(DEFAULT_MEMBERS));
+      memoryStorage = [];
       return memoryStorage;
     }
 
     function safeSaveMembers(data) {
       memoryStorage = data;
       try {
-        window.localStorage.setItem('family_members_v3', JSON.stringify(data));
+        window.localStorage.setItem('family_members_v4_clean', JSON.stringify(data));
       } catch (e) {}
     }
 
     let members = safeLoadMembers();
-    let currentMemberId = members[0].id;
+    let currentMemberId = members.length > 0 ? members[0].id : null;
     let pendingDeleteMemberId = null;
 
     // User Access & Auth State (Admin mobile is 2000)
@@ -1689,7 +1582,7 @@
       renderHome();
 
       if (currentMemberId === targetId) {
-        currentMemberId = members[0].id;
+        currentMemberId = members.length > 0 ? members[0].id : null;
         showView('home');
       }
 

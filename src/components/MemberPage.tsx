@@ -12,7 +12,7 @@ interface MemberPageProps {
   currentUser?: AuthUser;
 }
 
-type TabType = 'about' | 'room' | 'location';
+type TabType = 'about' | 'room';
 
 const CARICATURE_THEMES: Record<
   CaricatureType,
@@ -70,47 +70,20 @@ export const MemberPage: React.FC<MemberPageProps> = ({
   currentUser,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('about');
-  const [liveLocation, setLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [isDetectingGeo, setIsDetectingGeo] = useState<boolean>(false);
-  const [geoStatus, setGeoStatus] = useState<string>('');
-
-  const detectLiveGeo = () => {
-    if (!navigator.geolocation) {
-      setGeoStatus('Browser geolocation not supported');
-      return;
-    }
-    setIsDetectingGeo(true);
-    setGeoStatus('Acquiring live GPS...');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLiveLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setIsDetectingGeo(false);
-        setGeoStatus('Live GPS synced');
-      },
-      () => {
-        setIsDetectingGeo(false);
-        setGeoStatus('Using member recorded coordinates');
-      },
-      { enableHighAccuracy: true, timeout: 7000 }
-    );
-  };
-
-  useEffect(() => {
-    detectLiveGeo();
-  }, []);
 
   // Room Notes State
   const [roomNotes, setRoomNotes] = useState<string>(member.room_notes || '');
   const [isSavedNotes, setIsSavedNotes] = useState<boolean>(false);
 
   // Room Checklist State
-  const [checklist, setChecklist] = useState<ChecklistItem[]>(
-    member.checklist || [
-      { id: '1', text: 'Tidy up the room & study table', completed: true },
-      { id: '2', text: 'Water the plants', completed: false },
-    ]
-  );
+  const [checklist, setChecklist] = useState<ChecklistItem[]>(member.checklist || []);
   const [newChecklistText, setNewChecklistText] = useState<string>('');
+
+  // Keep local notes and checklist synchronized with latest member updates
+  useEffect(() => {
+    setRoomNotes(member.room_notes || '');
+    setChecklist(member.checklist || []);
+  }, [member]);
 
   // Tags & Image Quick State
   const [isAddingTag, setIsAddingTag] = useState<boolean>(false);
@@ -222,7 +195,7 @@ export const MemberPage: React.FC<MemberPageProps> = ({
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
-          <span>← Back to Home</span>
+          <span>Back to Home</span>
         </button>
 
         {/* Member breadcrumb indicator */}
@@ -450,18 +423,6 @@ export const MemberPage: React.FC<MemberPageProps> = ({
               <span>🛋️</span>
               <span>My Room</span>
             </button>
-
-            <button
-              onClick={() => setActiveTab('location')}
-              className={`flex-1 min-w-[130px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                activeTab === 'location'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <span>📍</span>
-              <span>Current Location</span>
-            </button>
           </div>
 
           {/* Tab 1: About & Story View */}
@@ -605,97 +566,6 @@ export const MemberPage: React.FC<MemberPageProps> = ({
               </div>
             </div>
           )}
-
-          {/* Tab 3: Current Location View (Live Google Maps & GPS) */}
-          {activeTab === 'location' && (() => {
-            const lat = liveLocation?.lat || member.location?.lat || 12.9716;
-            const lng = liveLocation?.lng || member.location?.lng || 77.5946;
-
-            return (
-              <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-xl animate-fadeIn space-y-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                  <div>
-                    <div className="flex items-center gap-2 text-indigo-600 font-bold text-xs uppercase tracking-wider mb-1">
-                      <span>📍</span>
-                      <span>Live Geolocation & Map</span>
-                      {geoStatus && (
-                        <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                          {geoStatus}
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="text-lg font-extrabold text-slate-900">
-                      {member.location?.name || `${member.name}'s Current Location`}
-                    </h3>
-                    <p className="text-xs text-slate-500 font-medium">
-                      {member.location?.address || 'Current detected live area'}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={detectLiveGeo}
-                      disabled={isDetectingGeo}
-                      className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
-                    >
-                      {isDetectingGeo ? 'Locating...' : '📍 Refresh GPS'}
-                    </button>
-                    <a
-                      href={`https://www.google.com/maps?q=${lat},${lng}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-2xs flex items-center gap-1 active:scale-95"
-                    >
-                      <span>Open in Google Maps</span>
-                      <span>↗</span>
-                    </a>
-                  </div>
-                </div>
-
-                {/* Live Embedded Google Maps Iframe */}
-                <div className="relative w-full h-80 rounded-2xl overflow-hidden border-2 border-indigo-100 bg-slate-100 shadow-md">
-                  <iframe
-                    title={`${member.name} Live Location`}
-                    src={`https://maps.google.com/maps?q=${lat},${lng}&z=15&output=embed`}
-                    className="w-full h-full border-0"
-                    loading="lazy"
-                    allowFullScreen
-                  />
-
-                  {/* Floating Live GPS Marker Pill */}
-                  <div className="absolute top-3 left-3 bg-white/95 backdrop-blur-md rounded-xl shadow-md border border-slate-200 px-3 py-1.5 flex items-center gap-2 text-xs font-bold text-slate-800 z-10">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>
-                      GPS Coordinates: {lat.toFixed(4)}°, {lng.toFixed(4)}°
-                    </span>
-                  </div>
-                </div>
-
-                {/* Real-time Status Card */}
-                <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-2xl p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xl">🛰️</span>
-                    <div>
-                      <h4 className="text-xs font-bold text-indigo-950 mb-0.5">Live Location Tracking Active</h4>
-                      <p className="text-xs text-indigo-800">
-                        Map synchronizes with browser geolocation and Google Maps.
-                      </p>
-                    </div>
-                  </div>
-                  <a
-                    href={`https://www.google.com/maps?q=${lat},${lng}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-bold text-indigo-600 hover:text-indigo-800 underline flex items-center gap-0.5"
-                  >
-                    <span>Full Map View</span>
-                    <span>↗</span>
-                  </a>
-                </div>
-              </div>
-            );
-          })()}
         </div>
       </div>
     </div>

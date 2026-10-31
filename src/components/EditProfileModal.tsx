@@ -6,16 +6,17 @@ interface EditProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   member: FamilyMember;
+  allMembers?: FamilyMember[];
   onSave: (id: string, updates: Partial<FamilyMember>) => Promise<void>;
 }
 
 const CARICATURE_OPTIONS: { key: CaricatureType; label: string }[] = [
-  { key: 'jishnu', label: 'Jishnu' },
-  { key: 'ashna', label: 'Ashna' },
-  { key: 'raju', label: 'Raju' },
-  { key: 'lalitha', label: 'Lalitha' },
   { key: 'boy', label: 'Young Boy' },
   { key: 'girl', label: 'Young Girl' },
+  { key: 'jishnu', label: 'Modern Geek' },
+  { key: 'ashna', label: 'Creative Artist' },
+  { key: 'raju', label: 'Wise Elder' },
+  { key: 'lalitha', label: 'Master Chef' },
   { key: 'elder', label: 'Grandparent' },
   { key: 'pet', label: 'Pet' },
 ];
@@ -24,6 +25,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   isOpen,
   onClose,
   member,
+  allMembers = [],
   onSave,
 }) => {
   const [name, setName] = useState(member.name);
@@ -35,6 +37,9 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   const [quote, setQuote] = useState(member.quote || '');
   const [tags, setTags] = useState<string[]>(member.tags || []);
   const [newTagInput, setNewTagInput] = useState('');
+  const [roomTitle, setRoomTitle] = useState(member.room_title || '');
+  const [roomDesc, setRoomDesc] = useState(member.room_desc || '');
+  const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -46,6 +51,9 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     setBio(member.bio || '');
     setQuote(member.quote || '');
     setTags(member.tags || []);
+    setRoomTitle(member.room_title || '');
+    setRoomDesc(member.room_desc || '');
+    setError(null);
   }, [member]);
 
   if (!isOpen) return null;
@@ -81,21 +89,54 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    const cleanName = name.trim();
+    const cleanPhone = mobileNumber.trim();
+    if (!cleanName) {
+      setError('Please enter a name.');
+      return;
+    }
+    if (!cleanPhone) {
+      setError('Please enter a mobile phone number.');
+      return;
+    }
+    if (cleanPhone === '2000') {
+      setError('Mobile number "2000" is reserved for Admin login.');
+      return;
+    }
+
+    const isDuplicate = allMembers.some(
+      (m) => m.id !== member.id && String(m.mobile_number || '').trim() === cleanPhone
+    );
+    if (isDuplicate) {
+      setError('This mobile number is already registered to another family member.');
+      return;
+    }
 
     setIsSubmitting(true);
+    setError(null);
     try {
-      await onSave(member.id, {
-        name: name.trim(),
-        mobile_number: mobileNumber.trim() || member.mobile_number,
-        role: role.trim(),
+      const updates: Partial<FamilyMember> = {
+        name: cleanName,
+        mobile_number: cleanPhone,
+        role: role.trim() || member.role,
         caricature_key: caricatureKey,
-        image_url: imageUrl.trim() || undefined,
-        bio: bio.trim(),
-        quote: quote.trim(),
+        bio: bio.trim() || member.bio,
+        quote: quote.trim() || member.quote,
         tags,
-      });
+        room_title: roomTitle.trim() || member.room_title,
+        room_desc: roomDesc.trim() || member.room_desc,
+      };
+
+      // Handle image updates explicitly so existing photos are never lost
+      if (imageUrl !== member.image_url) {
+        updates.image_url = imageUrl;
+      }
+
+      await onSave(member.id, updates);
       onClose();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error saving profile';
+      setError(msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -120,6 +161,13 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
             ✕
           </button>
         </div>
+
+        {error && (
+          <div className="mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           {/* Name & Role */}
@@ -320,6 +368,39 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
               placeholder="Favorite quote..."
               className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-medium outline-hidden"
             />
+          </div>
+
+          {/* Room Sanctuary Details */}
+          <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+              🛋️ Room Sanctuary Settings
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Room Title / Corner Name
+                </label>
+                <input
+                  type="text"
+                  value={roomTitle}
+                  onChange={(e) => setRoomTitle(e.target.value)}
+                  placeholder="e.g. Creative Haven"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 bg-white text-xs outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Room Description
+                </label>
+                <input
+                  type="text"
+                  value={roomDesc}
+                  onChange={(e) => setRoomDesc(e.target.value)}
+                  placeholder="e.g. Sunlit room with watercolors"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 bg-white text-xs outline-hidden"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Action Buttons */}

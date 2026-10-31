@@ -4,11 +4,15 @@ import { FamilyService } from '../services/api';
 
 interface FamilyGalleryProps {
   currentUserName?: string;
+  currentUserRole?: string;
+  currentUserId?: string;
   onShowToast: (message: string, type?: 'success' | 'error') => void;
 }
 
 export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
   currentUserName = 'Family Member',
+  currentUserRole = 'member',
+  currentUserId,
   onShowToast,
 }) => {
   const [items, setItems] = useState<GalleryItem[]>([]);
@@ -66,7 +70,8 @@ export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
       await FamilyService.addGalleryItem(
         previewDataUrl,
         photoTitle.trim() || 'Family Memory',
-        currentUserName
+        currentUserName,
+        currentUserId
       );
       onShowToast('Photo saved to Family Gallery in database!');
       setIsUploadModalOpen(false);
@@ -170,15 +175,17 @@ export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
                 </div>
               </div>
 
-              {/* Delete button */}
-              <button
-                type="button"
-                onClick={(e) => handleDeletePhoto(item.id, e)}
-                title="Delete photo"
-                className="absolute top-2 right-2 w-6 h-6 rounded-lg bg-slate-900/60 hover:bg-rose-600 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition shadow-md"
-              >
-                ✕
-              </button>
+              {/* Delete button (Admin or own uploads only) */}
+              {(currentUserRole === 'admin' || (item.uploaded_by_id && item.uploaded_by_id === currentUserId) || item.uploaded_by === currentUserName) && (
+                <button
+                  type="button"
+                  onClick={(e) => handleDeletePhoto(item.id, e)}
+                  title="Delete photo"
+                  className="absolute top-2 right-2 w-6 h-6 rounded-lg bg-slate-900/60 hover:bg-rose-600 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition shadow-md"
+                >
+                  ✕
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -278,13 +285,15 @@ export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
                   Uploaded by {selectedImage.uploaded_by || 'Family Member'} • {new Date(selectedImage.created_at).toLocaleDateString()}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={(e) => handleDeletePhoto(selectedImage.id, e)}
-                className="text-xs text-rose-400 hover:text-rose-300 font-bold px-3 py-1.5 rounded-lg border border-rose-800 hover:bg-rose-950/50 transition"
-              >
-                Delete Photo
-              </button>
+              {(currentUserRole === 'admin' || (selectedImage.uploaded_by_id && selectedImage.uploaded_by_id === currentUserId) || selectedImage.uploaded_by === currentUserName) && (
+                <button
+                  type="button"
+                  onClick={(e) => handleDeletePhoto(selectedImage.id, e)}
+                  className="text-xs text-rose-400 hover:text-rose-300 font-bold px-3 py-1.5 rounded-lg border border-rose-800 hover:bg-rose-950/50 transition"
+                >
+                  Delete Photo
+                </button>
+              )}
             </div>
           </div>
         </div>
