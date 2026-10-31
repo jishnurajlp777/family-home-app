@@ -4,8 +4,8 @@ import { CartoonHome } from './CartoonHome';
 import { Caricature } from './Caricature';
 import { MembersMap } from './MembersMap';
 import { FamilyGallery } from './FamilyGallery';
-import { CloudConfigModal } from './CloudConfigModal';
-import { firebaseService } from '../services/firebaseService';
+import { DatabaseSettingsModal } from './DatabaseSettingsModal';
+import { FamilyService } from '../services/api';
 
 interface HomePageProps {
   members: FamilyMember[];
@@ -30,8 +30,8 @@ export const HomePage: React.FC<HomePageProps> = ({
   onShowToast,
   onRefresh,
 }) => {
-  const [isCloudConfigOpen, setIsCloudConfigOpen] = useState(false);
-  const isCloudActive = firebaseService.isAvailable();
+  const [isDbSettingsOpen, setIsDbSettingsOpen] = useState(false);
+  const isDbConnected = FamilyService.isConnectedToServer();
   const isAdmin = currentUser.role === 'admin';
 
   const handleMemberCardClick = (member: FamilyMember) => {
@@ -85,16 +85,16 @@ export const HomePage: React.FC<HomePageProps> = ({
 
           <button
             type="button"
-            onClick={() => setIsCloudConfigOpen(true)}
+            onClick={() => setIsDbSettingsOpen(true)}
             className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition shadow-2xs active:scale-95 ${
-              isCloudActive
+              isDbConnected
                 ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
                 : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
             }`}
-            title="Manage Cloud Database (Firebase Firestore)"
+            title="Manage Database & Backend Server Connection"
           >
-            <span>{isCloudActive ? '🟢' : '☁️'}</span>
-            <span className="hidden sm:inline">{isCloudActive ? 'Cloud Live' : 'Cloud DB'}</span>
+            <span>{isDbConnected ? '🟢' : '🗄️'}</span>
+            <span className="hidden sm:inline">{isDbConnected ? 'Database Live' : 'DB / Server'}</span>
           </button>
 
           <button
@@ -282,13 +282,13 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </div>
 
-      {/* Cloud Database Config Modal */}
-      <CloudConfigModal
-        isOpen={isCloudConfigOpen}
-        onClose={() => setIsCloudConfigOpen(false)}
+      {/* Database & Server Settings Modal */}
+      <DatabaseSettingsModal
+        isOpen={isDbSettingsOpen}
+        onClose={() => setIsDbSettingsOpen(false)}
         onConfigSaved={() => {
           if (onRefresh) onRefresh();
-          onShowToast('Cloud database settings updated!', 'success');
+          onShowToast('Database connection settings saved!', 'success');
         }}
       />
     </div>

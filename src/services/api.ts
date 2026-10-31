@@ -1,12 +1,11 @@
 import { FamilyMember, NewMemberInput, UpdateMemberInput, GalleryItem, AuthUser } from '../types/member';
-import { firebaseService } from './firebaseService';
 
-const API_BASE = '/api/members';
 const STORAGE_KEY = 'family_home_database_records_v2';
 const STORAGE_KEY_GALLERY = 'family_home_gallery_v1';
 const STORAGE_KEY_AUTH = 'family_home_auth_user_v1';
+const STORAGE_KEY_API_URL = 'family_home_api_url_override';
 
-const DEFAULT_SEEDS: FamilyMember[] = [
+export const DEFAULT_SEEDS: FamilyMember[] = [
   {
     id: 'mem_jishnu',
     name: 'Jishnu',
@@ -122,51 +121,64 @@ const DEFAULT_SEEDS: FamilyMember[] = [
 export class FamilyService {
   private static isServerMode: boolean = false;
 
-  public static async checkConnection(): Promise<boolean> {
-    if (firebaseService.isAvailable()) {
-      return true;
+  /**
+   * Resolves the API base URL:
+   * 1. Manual user override in localStorage (useful in APK to point to live API or computer IP)
+   * 2. VITE_API_BASE_URL (configured in .env.production)
+   * 3. Relative empty string '' (for same-origin or localhost proxy)
+   */
+  public static getApiBase(): string {
+    try {
+      const override = localStorage.getItem(STORAGE_KEY_API_URL);
+      if (override && override.trim()) {
+        return override.trim().replace(/\/$/, '');
+      }
+    } catch {}
+
+    const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+    if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+      return envUrl.trim().replace(/\/$/, '');
     }
 
+    return '';
+  }
+
+  public static setApiBase(url: string | null): void {
+    try {
+      if (url && url.trim()) {
+        localStorage.setItem(STORAGE_KEY_API_URL, url.trim().replace(/\/$/, ''));
+      } else {
+        localStorage.removeItem(STORAGE_KEY_API_URL);
+      }
+    } catch {}
+  }
+
+  public static async checkConnection(): Promise<{ connected: boolean; dbType: string }> {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1200);
-      const res = await fetch(API_BASE, { signal: controller.signal });
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch(`${this.getApiBase()}/api/health`, { signal: controller.signal });
       clearTimeout(timeoutId);
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
         this.isServerMode = true;
-        return true;
+        return { connected: true, dbType: data.database || 'MySQL' };
       }
     } catch {
       // offline
     }
     this.isServerMode = false;
-    return false;
+    return { connected: false, dbType: 'Local Cache' };
   }
 
-  public static isCloudMode(): boolean {
-    return firebaseService.isAvailable();
+  public static isConnectedToServer(): boolean {
+    return this.isServerMode;
   }
 
   public static async getAll(): Promise<FamilyMember[]> {
-    // 1. Check Cloud Firestore
-    if (firebaseService.isAvailable()) {
-      try {
-        const cloudMembers = await firebaseService.getMembers();
-        if (cloudMembers.length === 0) {
-          await firebaseService.seedDefaultMembers(DEFAULT_SEEDS);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_SEEDS));
-          return DEFAULT_SEEDS;
-        }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudMembers));
-        return cloudMembers;
-      } catch (err) {
-        console.warn('Firebase getMembers failed, falling back:', err);
-      }
-    }
-
-    // 2. Check Local SQLite Server
+    // 1. Try fetching from Backend Server (MySQL)
     try {
-      const res = await fetch(API_BASE);
+      const res = await fetch(`${this.getApiBase()}/api/members`);
       if (res.ok) {
         const data = await res.json();
         this.isServerMode = true;
@@ -179,7 +191,7 @@ export class FamilyService {
       this.isServerMode = false;
     }
 
-    // 3. Fallback to Local Storage
+    // 2. Fallback to Local Storage Cache
     try {
       const localData = localStorage.getItem(STORAGE_KEY);
       if (!localData) {
@@ -193,10 +205,15 @@ export class FamilyService {
   }
 
   public static subscribeMembers(callback: (members: FamilyMember[]) => void) {
-    if (firebaseService.isAvailable()) {
-      return firebaseService.subscribeMembers(callback);
-    }
-    return null;
+    // Periodic poll to keep multiple clients/devices in sync
+    const interval = setInterval(async () => {
+      try {
+        const data = await this.getAll();
+        callback(data);
+      } catch {}
+    }, 10000);
+
+    return () => clearInterval(interval);
   }
 
   public static async getById(id: string): Promise<FamilyMember | null> {
@@ -236,33 +253,25 @@ export class FamilyService {
       updated_at: now,
     };
 
-    // 1. Cloud Firestore
-    if (firebaseService.isAvailable()) {
-      try {
-        await firebaseService.createMember(newRecord);
+    // 1. Send to Backend Server (MySQL)
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        this.isServerMode = true;
         const all = await this.getAll();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-        return newRecord;
-      } catch (err) {
-        console.warn('Firebase createMember failed:', err);
+        return created;
       }
+    } catch {
+      this.isServerMode = false;
     }
 
-    // 2. Local SQLite Server
-    if (this.isServerMode) {
-      try {
-        const res = await fetch(API_BASE, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(input),
-        });
-        if (res.ok) return await res.json();
-      } catch {
-        this.isServerMode = false;
-      }
-    }
-
-    // 3. Local Storage
+    // 2. Fallback to Local Storage
     const all = await this.getAll();
     all.push(newRecord);
     try {
@@ -272,41 +281,31 @@ export class FamilyService {
   }
 
   public static async update(id: string, updates: UpdateMemberInput): Promise<FamilyMember> {
-    // 1. Cloud Firestore
-    if (firebaseService.isAvailable()) {
-      try {
-        const updated = await firebaseService.updateMember(id, updates);
-        const all = await this.getAll();
-        const idx = all.findIndex(m => m.id === id);
-        if (idx !== -1) all[idx] = updated;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-        return updated;
-      } catch (err) {
-        console.warn('Firebase updateMember failed:', err);
-      }
-    }
-
-    // 2. Local SQLite Server
-    let serverUpdated: FamilyMember | null = null;
+    // 1. Send to Backend Server (MySQL)
     try {
-      const res = await fetch(`${API_BASE}/${id}`, {
+      const res = await fetch(`${this.getApiBase()}/api/members/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       });
       if (res.ok) {
-        serverUpdated = await res.json();
+        const serverUpdated = await res.json();
         this.isServerMode = true;
+        const all = await this.getAll();
+        const idx = all.findIndex((m) => m.id === id);
+        if (idx !== -1) all[idx] = serverUpdated;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+        return serverUpdated;
       }
     } catch {
       this.isServerMode = false;
     }
 
-    // 3. Local Storage
+    // 2. Fallback to Local Storage
     const all = await this.getAll();
     const index = all.findIndex((m) => m.id === id);
     if (index !== -1) {
-      const updatedRecord: FamilyMember = serverUpdated || {
+      const updatedRecord: FamilyMember = {
         ...all[index],
         ...updates,
         updated_at: new Date().toISOString(),
@@ -316,45 +315,21 @@ export class FamilyService {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
       } catch {}
       return updatedRecord;
-    } else if (serverUpdated) {
-      all.push(serverUpdated);
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-      } catch {}
-      return serverUpdated;
     }
 
     throw new Error('Member not found');
   }
 
   public static async delete(id: string): Promise<{ success: boolean; message: string }> {
-    // 1. Cloud Firestore
-    if (firebaseService.isAvailable()) {
-      try {
-        await firebaseService.deleteMember(id);
-        const all = await this.getAll();
-        const filtered = all.filter((m) => m.id !== id);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-        return {
-          success: true,
-          message: 'Database Success: Member removed from cloud database.',
-        };
-      } catch (err) {
-        console.warn('Firebase deleteMember failed:', err);
-      }
-    }
-
-    // 2. Local SQLite Server
+    // 1. Try deleting via Backend Server (MySQL)
     try {
-      const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${this.getApiBase()}/api/members/${id}`, { method: 'DELETE' });
       if (res.ok) {
         const data = await res.json();
         this.isServerMode = true;
-        try {
-          const all = await this.getAll();
-          const filtered = all.filter((m) => m.id !== id);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-        } catch {}
+        const all = await this.getAll();
+        const filtered = all.filter((m) => m.id !== id);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
         return {
           success: true,
           message: data.message || 'Database Success: Member removed from database.',
@@ -372,7 +347,7 @@ export class FamilyService {
       this.isServerMode = false;
     }
 
-    // 3. Local Storage
+    // 2. Fallback to Local Storage
     const all = await this.getAll();
     if (all.length <= 1) {
       throw new Error('Cannot delete: Database requires at least 1 family record.');
@@ -383,26 +358,21 @@ export class FamilyService {
     } catch {}
     return {
       success: true,
-      message: 'Database Success: Member removed from database.',
+      message: 'Database Success: Member removed from local database.',
     };
   }
 
   public static async resetDefaults(): Promise<FamilyMember[]> {
-    if (firebaseService.isAvailable()) {
-      for (const m of DEFAULT_SEEDS) {
-        await firebaseService.createMember(m);
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/reset`, { method: 'POST' });
+      if (res.ok) {
+        this.isServerMode = true;
+        return await this.getAll();
       }
-      return DEFAULT_SEEDS;
+    } catch {
+      this.isServerMode = false;
     }
 
-    if (this.isServerMode) {
-      try {
-        await fetch('/api/reset', { method: 'POST' });
-        return await this.getAll();
-      } catch {
-        this.isServerMode = false;
-      }
-    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_SEEDS));
     } catch {}
@@ -423,28 +393,20 @@ export class FamilyService {
   // GALLERY API METHODS
   // ==========================================
   public static async getGallery(): Promise<GalleryItem[]> {
-    // 1. Cloud Firestore
-    if (firebaseService.isAvailable()) {
-      try {
-        const items = await firebaseService.getGallery();
+    // 1. Try Backend Server (MySQL)
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/gallery`);
+      if (res.ok) {
+        const items = await res.json();
+        this.isServerMode = true;
         localStorage.setItem(STORAGE_KEY_GALLERY, JSON.stringify(items));
         return items;
-      } catch (err) {
-        console.warn('Firebase getGallery failed:', err);
       }
+    } catch {
+      this.isServerMode = false;
     }
 
-    // 2. Local SQLite Server
-    if (this.isServerMode) {
-      try {
-        const res = await fetch('/api/gallery');
-        if (res.ok) return await res.json();
-      } catch {
-        this.isServerMode = false;
-      }
-    }
-
-    // 3. Local Storage
+    // 2. Local Storage Cache
     try {
       const local = localStorage.getItem(STORAGE_KEY_GALLERY);
       return local ? JSON.parse(local) : [];
@@ -454,10 +416,14 @@ export class FamilyService {
   }
 
   public static subscribeGallery(callback: (items: GalleryItem[]) => void) {
-    if (firebaseService.isAvailable()) {
-      return firebaseService.subscribeGallery(callback);
-    }
-    return null;
+    const interval = setInterval(async () => {
+      try {
+        const items = await this.getGallery();
+        callback(items);
+      } catch {}
+    }, 12000);
+
+    return () => clearInterval(interval);
   }
 
   public static async addGalleryItem(imageData: string, title?: string, uploadedBy?: string): Promise<GalleryItem> {
@@ -470,33 +436,25 @@ export class FamilyService {
       created_at: new Date().toISOString(),
     };
 
-    // 1. Cloud Firestore
-    if (firebaseService.isAvailable()) {
-      try {
-        await firebaseService.addGalleryItem(newItem);
+    // 1. Backend Server (MySQL)
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/gallery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data: imageData, title, uploaded_by: uploadedBy }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        this.isServerMode = true;
         const items = await this.getGallery();
         localStorage.setItem(STORAGE_KEY_GALLERY, JSON.stringify(items));
-        return newItem;
-      } catch (err) {
-        console.warn('Firebase addGalleryItem failed:', err);
+        return created;
       }
+    } catch {
+      this.isServerMode = false;
     }
 
-    // 2. Local SQLite Server
-    if (this.isServerMode) {
-      try {
-        const res = await fetch('/api/gallery', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_data: imageData, title, uploaded_by: uploadedBy }),
-        });
-        if (res.ok) return await res.json();
-      } catch {
-        this.isServerMode = false;
-      }
-    }
-
-    // 3. Local Storage
+    // 2. Fallback to Local Storage
     const items = await this.getGallery();
     items.unshift(newItem);
     try {
@@ -506,30 +464,21 @@ export class FamilyService {
   }
 
   public static async deleteGalleryItem(id: string): Promise<boolean> {
-    // 1. Cloud Firestore
-    if (firebaseService.isAvailable()) {
-      try {
-        await firebaseService.deleteGalleryItem(id);
+    // 1. Backend Server (MySQL)
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/gallery/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        this.isServerMode = true;
         const items = await this.getGallery();
         const filtered = items.filter((item) => item.id !== id);
         localStorage.setItem(STORAGE_KEY_GALLERY, JSON.stringify(filtered));
         return true;
-      } catch (err) {
-        console.warn('Firebase deleteGalleryItem failed:', err);
       }
+    } catch {
+      this.isServerMode = false;
     }
 
-    // 2. Local SQLite Server
-    if (this.isServerMode) {
-      try {
-        const res = await fetch(`/api/gallery/${id}`, { method: 'DELETE' });
-        if (res.ok) return true;
-      } catch {
-        this.isServerMode = false;
-      }
-    }
-
-    // 3. Local Storage
+    // 2. Fallback to Local Storage
     const items = await this.getGallery();
     const filtered = items.filter((item) => item.id !== id);
     try {
@@ -561,7 +510,7 @@ export class FamilyService {
       throw new Error('Please enter a mobile number.');
     }
 
-    // 1. Admin login
+    // 1. Admin shortcut login
     if (clean === '2000') {
       const adminUser: AuthUser = {
         role: 'admin',
@@ -574,7 +523,7 @@ export class FamilyService {
 
     // 2. Server login attempt
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(`${this.getApiBase()}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile_number: clean }),
@@ -595,7 +544,7 @@ export class FamilyService {
       // Offline fallback
     }
 
-    // 3. Fallback: match against members list (checks Cloud / Local DB / Storage)
+    // 3. Fallback: match against members list
     const members = await this.getAll();
     const matched = members.find((m) => String(m.mobile_number || '').trim() === clean);
     if (matched) {
@@ -610,7 +559,7 @@ export class FamilyService {
       return user;
     }
 
-    throw new Error('Mobile number not found. Enter "2000" for Admin or a registered member mobile number.');
+    throw new Error('Mobile number not found. Enter "2000" for Admin or your registered member mobile number.');
   }
 
   public static logout(): void {

@@ -1,7 +1,7 @@
 @echo off
-title Family Home Dev Environment (Full-Stack TypeScript & SQLite)
+title Family Home Dev Environment (React + TS + MySQL)
 echo ========================================================
-echo   Starting Family Home Dev (React + TS + SQLite)
+echo   Starting Family Home Dev (React + TS + Node.js + MySQL)
 echo ========================================================
 echo.
 
@@ -12,8 +12,8 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b
 )
 
-echo [1/2] Starting SQLite Backend Server (Port 3000)...
-start "Family Backend Server" cmd /k "node server/server.js"
+echo [1/2] Starting Node.js API Backend (Port 3000)...
+start "Family API Backend (MySQL)" cmd /k "node server/server.js"
 
 echo [2/2] Starting Vite Frontend Server (Port 5173)...
 start "" http://localhost:5173

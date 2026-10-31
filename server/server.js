@@ -1,157 +1,226 @@
 /**
- * Family Home Interface - Backend Server (Node.js + SQLite)
- * Uses native node:sqlite DatabaseSync (Node 22+) in ES Module mode
+ * Family Home Interface - Backend Server (Node.js + MySQL)
+ * Native HTTP server with mysql2 connection pool & fallback cache
  */
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
+import mysql from 'mysql2/promise';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// 1. Load Environment Variables (.env / server/.env)
+function loadEnv() {
+  const envCandidates = [
+    path.join(__dirname, '.env'),
+    path.join(__dirname, '..', '.env'),
+    path.join(__dirname, '.env.development'),
+  ];
+  for (const envFile of envCandidates) {
+    if (fs.existsSync(envFile)) {
+      try {
+        if (typeof process.loadEnvFile === 'function') {
+          process.loadEnvFile(envFile);
+        } else {
+          const content = fs.readFileSync(envFile, 'utf8');
+          for (const line of content.split('\n')) {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#')) {
+              const eqIdx = trimmed.indexOf('=');
+              if (eqIdx > 0) {
+                const key = trimmed.slice(0, eqIdx).trim();
+                const val = trimmed.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+                if (!process.env[key]) process.env[key] = val;
+              }
+            }
+          }
+        }
+        console.log(`📄 Loaded environment from ${path.basename(envFile)}`);
+        break;
+      } catch (e) {
+        console.warn(`Could not read ${envFile}:`, e.message);
+      }
+    }
+  }
+}
+loadEnv();
+
 const PORT = process.env.PORT || 3000;
-const DB_PATH = path.join(__dirname, 'family.db');
+const DB_HOST = process.env.DB_HOST || 'localhost';
+const DB_PORT = Number(process.env.DB_PORT) || 3306;
+const DB_USER = process.env.DB_USER || 'root';
+const DB_PASSWORD = process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : '';
+const DB_NAME = process.env.DB_NAME || 'family_home_db';
 const DIST_PATH = path.join(__dirname, '..', 'dist');
 
-const db = new DatabaseSync(DB_PATH);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS members (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    caricature_key TEXT NOT NULL,
-    image_url TEXT,
-    mobile_number TEXT,
-    role TEXT,
-    bio TEXT,
-    tags TEXT,
-    room_title TEXT,
-    room_desc TEXT,
-    room_status TEXT,
-    room_notes TEXT,
-    checklist TEXT,
-    location TEXT,
-    quote TEXT,
-    created_at TEXT,
-    updated_at TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS gallery (
-    id TEXT PRIMARY KEY,
-    image_data TEXT NOT NULL,
-    title TEXT,
-    uploaded_by TEXT,
-    created_at TEXT
-  );
-`);
-
-try { db.exec('ALTER TABLE members ADD COLUMN image_url TEXT;'); } catch {}
-try { db.exec('ALTER TABLE members ADD COLUMN mobile_number TEXT;'); } catch {}
-try { db.exec('ALTER TABLE members ADD COLUMN room_notes TEXT;'); } catch {}
-try { db.exec('ALTER TABLE members ADD COLUMN checklist TEXT;'); } catch {}
-try { db.exec('ALTER TABLE members ADD COLUMN location TEXT;'); } catch {}
-try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS gallery (
-      id TEXT PRIMARY KEY,
-      image_data TEXT NOT NULL,
-      title TEXT,
-      uploaded_by TEXT,
-      created_at TEXT
-    );
-  `);
-} catch {}
-
+// 2. Default Seed Data
 const DEFAULT_MEMBERS = [
   {
-    id: "mem_jishnu",
-    name: "Jishnu",
-    mobile_number: "9876543210",
-    caricature_key: "jishnu",
-    role: "Tech Explorer",
-    bio: "Curious tech explorer, loves coding cool tools, gaming, and late night coffee brews.",
-    tags: JSON.stringify(["💻 Tech Lover", "☕ Coffee Fan", "🎮 Gamer"]),
+    id: 'mem_jishnu',
+    name: 'Jishnu',
+    mobile_number: '9876543210',
+    caricature_key: 'jishnu',
+    role: 'Tech Explorer',
+    bio: 'Curious tech explorer, loves coding cool tools, gaming, and late night coffee brews.',
+    tags: JSON.stringify(['💻 Tech Lover', '☕ Coffee Fan', '🎮 Gamer']),
     room_title: "Jishnu's Tech Den",
-    room_desc: "Dual-monitor setup with warm ambient strip lighting, mechanical keyboards, and a comfy beanbag.",
-    room_status: "Currently compiling code and listening to lo-fi beats.",
-    quote: "Keep creating, keep questioning, and never stop building awesome things!",
+    room_desc: 'Dual-monitor setup with warm ambient strip lighting, mechanical keyboards, and a comfy beanbag.',
+    room_status: 'Currently compiling code and listening to lo-fi beats.',
+    quote: 'Keep creating, keep questioning, and never stop building awesome things!',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
   },
   {
-    id: "mem_ashna",
-    name: "Ashna",
-    mobile_number: "9876543211",
-    caricature_key: "ashna",
-    role: "Creative Artist",
-    bio: "Creative mind, loves painting, cozy playlists, sweet treats, and family weekend trips.",
-    tags: JSON.stringify(["🎨 Creative Artist", "🎵 Music Lover", "🧁 Baker"]),
+    id: 'mem_ashna',
+    name: 'Ashna',
+    mobile_number: '9876543211',
+    caricature_key: 'ashna',
+    role: 'Creative Artist',
+    bio: 'Creative mind, loves painting, cozy playlists, sweet treats, and family weekend trips.',
+    tags: JSON.stringify(['🎨 Creative Artist', '🎵 Music Lover', '🧁 Baker']),
     room_title: "Ashna's Art Haven",
-    room_desc: "Sunlit room with fairy lights, watercolor sketches pinned on walls, and potted succulents.",
-    room_status: "Sketching new designs and organizing pastel paints.",
-    quote: "Add a splash of color to everyday moments.",
+    room_desc: 'Sunlit room with fairy lights, watercolor sketches pinned on walls, and potted succulents.',
+    room_status: 'Sketching new designs and organizing pastel paints.',
+    quote: 'Add a splash of color to everyday moments.',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
   },
   {
-    id: "mem_raju",
-    name: "Raju",
-    mobile_number: "9876543212",
-    caricature_key: "raju",
-    role: "Family Pillar & Reader",
-    bio: "The family pillar! Enjoys morning newspaper walkabouts, gardening, and classic stories.",
-    tags: JSON.stringify(["🌿 Green Thumb", "📰 Avid Reader", "🛠️ Master Fixer"]),
+    id: 'mem_raju',
+    name: 'Raju',
+    mobile_number: '9876543212',
+    caricature_key: 'raju',
+    role: 'Family Pillar & Reader',
+    bio: 'The family pillar! Enjoys morning newspaper walkabouts, gardening, and classic stories.',
+    tags: JSON.stringify(['🌿 Green Thumb', '📰 Avid Reader', '🛠️ Master Fixer']),
     room_title: "Raju's Study & Garden Porch",
-    room_desc: "Comfortable rocking chair and vintage bookshelf overlooking the green front yard.",
-    room_status: "Pruning the jasmine plants and tuning into evening radio.",
-    quote: "Patience and hard work always bear the sweetest fruits.",
+    room_desc: 'Comfortable rocking chair and vintage bookshelf overlooking the green front yard.',
+    room_status: 'Pruning the jasmine plants and tuning into evening radio.',
+    quote: 'Patience and hard work always bear the sweetest fruits.',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
   },
   {
-    id: "mem_lalitha",
-    name: "Lalitha",
-    mobile_number: "9876543213",
-    caricature_key: "lalitha",
-    role: "Heart of Home & Chef",
-    bio: "The warm heart of the home. Master of delicious feasts, kindness, and keeping everyone connected.",
-    tags: JSON.stringify(["🍲 Master Chef", "🌸 Joy Spreader", "❤️ Heart of Home"]),
+    id: 'mem_lalitha',
+    name: 'Lalitha',
+    mobile_number: '9876543213',
+    caricature_key: 'lalitha',
+    role: 'Heart of Home & Chef',
+    bio: 'The warm heart of the home. Master of delicious feasts, kindness, and keeping everyone connected.',
+    tags: JSON.stringify(['🍲 Master Chef', '🌸 Joy Spreader', '❤️ Heart of Home']),
     room_title: "Lalitha's Cozy Sanctuary",
-    room_desc: "Filled with family photo albums, soft handcrafted cushions, and aroma of sweet cardamom.",
-    room_status: "Making evening snacks and sharing laughter on the phone.",
-    quote: "A happy family is an earlier heaven.",
+    room_desc: 'Filled with family photo albums, soft handcrafted cushions, and aroma of sweet cardamom.',
+    room_status: 'Making evening snacks and sharing laughter on the phone.',
+    quote: 'A happy family is an earlier heaven.',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }
+    updated_at: new Date().toISOString(),
+  },
 ];
 
-// Seed default members if table is empty
-const countResult = db.prepare('SELECT COUNT(*) AS total FROM members').get();
-if (countResult.total === 0) {
-  const insertStmt = db.prepare(`
-    INSERT INTO members (id, name, mobile_number, caricature_key, role, bio, tags, room_title, room_desc, room_status, quote, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  for (const m of DEFAULT_MEMBERS) {
-    insertStmt.run(m.id, m.name, m.mobile_number, m.caricature_key, m.role, m.bio, m.tags, m.room_title, m.room_desc, m.room_status, m.quote, m.created_at, m.updated_at);
-  }
-  console.log('🌱 SQLite initialized with 4 default members.');
-} else {
-  // Ensure default members have mobile numbers populated
+// Fallback in-memory cache if MySQL is offline
+let memoryMembers = [...DEFAULT_MEMBERS];
+let memoryGallery = [];
+
+// 3. MySQL Pool Management
+let pool = null;
+let isDbConnected = false;
+
+async function initMySQL() {
   try {
-    db.prepare("UPDATE members SET mobile_number = '9876543210' WHERE id = 'mem_jishnu' AND (mobile_number IS NULL OR mobile_number = '')").run();
-    db.prepare("UPDATE members SET mobile_number = '9876543211' WHERE id = 'mem_ashna' AND (mobile_number IS NULL OR mobile_number = '')").run();
-    db.prepare("UPDATE members SET mobile_number = '9876543212' WHERE id = 'mem_raju' AND (mobile_number IS NULL OR mobile_number = '')").run();
-    db.prepare("UPDATE members SET mobile_number = '9876543213' WHERE id = 'mem_lalitha' AND (mobile_number IS NULL OR mobile_number = '')").run();
-  } catch {}
+    // 1. Connect without database first to ensure DB exists
+    const rootConn = await mysql.createConnection({
+      host: DB_HOST,
+      port: DB_PORT,
+      user: DB_USER,
+      password: DB_PASSWORD,
+    });
+    await rootConn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    await rootConn.end();
+
+    // 2. Create pooled connection
+    pool = mysql.createPool({
+      host: DB_HOST,
+      port: DB_PORT,
+      user: DB_USER,
+      password: DB_PASSWORD,
+      database: DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      enableKeepAlive: true,
+    });
+
+    // 3. Initialize Tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS members (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        mobile_number VARCHAR(32) NOT NULL,
+        caricature_key VARCHAR(64) NOT NULL DEFAULT 'boy',
+        image_url LONGTEXT,
+        role VARCHAR(255) DEFAULT 'Cherished Family Member',
+        bio TEXT,
+        tags JSON,
+        room_title VARCHAR(255),
+        room_desc TEXT,
+        room_status TEXT,
+        room_notes TEXT,
+        checklist JSON,
+        location JSON,
+        quote TEXT,
+        created_at VARCHAR(64),
+        updated_at VARCHAR(64)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS gallery (
+        id VARCHAR(64) PRIMARY KEY,
+        image_data LONGTEXT NOT NULL,
+        title VARCHAR(255) DEFAULT 'Family Memory',
+        uploaded_by VARCHAR(255) DEFAULT 'Family Member',
+        created_at VARCHAR(64)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // 4. Seed if empty
+    const [rows] = await pool.query('SELECT COUNT(*) AS total FROM members');
+    if (rows[0].total === 0) {
+      for (const m of DEFAULT_MEMBERS) {
+        await pool.query(
+          `INSERT INTO members (id, name, mobile_number, caricature_key, role, bio, tags, room_title, room_desc, room_status, quote, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [m.id, m.name, m.mobile_number, m.caricature_key, m.role, m.bio, m.tags, m.room_title, m.room_desc, m.room_status, m.quote, m.created_at, m.updated_at]
+        );
+      }
+      console.log('🌱 MySQL database initialized with 4 default family members.');
+    }
+
+    isDbConnected = true;
+    console.log(`✅ MySQL Connected: ${DB_NAME} @ ${DB_HOST}:${DB_PORT}`);
+  } catch (err) {
+    isDbConnected = false;
+    pool = null;
+    console.warn(`⚠️ MySQL Connection Notice: Could not connect to ${DB_HOST}:${DB_PORT} (${err.code || err.message}).`);
+    console.warn(`👉 Operating with in-memory cache until MySQL starts. Will retry connecting periodically.`);
+  }
 }
 
+// Initial connect & periodic retry if DB was initially offline
+initMySQL();
+setInterval(() => {
+  if (!isDbConnected) {
+    initMySQL();
+  }
+}, 12000);
+
+// 4. Helper Parsers
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('data', (chunk) => { body += chunk.toString(); });
     req.on('end', () => {
       try {
         resolve(body ? JSON.parse(body) : {});
@@ -167,30 +236,31 @@ function formatRow(row) {
   if (!row) return null;
   let tags = [];
   try {
-    tags = JSON.parse(row.tags || '[]');
-  } catch (e) {
+    tags = typeof row.tags === 'string' ? JSON.parse(row.tags || '[]') : (row.tags || []);
+  } catch {
     tags = [];
   }
   let checklist = [];
   try {
-    checklist = JSON.parse(row.checklist || '[]');
-  } catch (e) {
+    checklist = typeof row.checklist === 'string' ? JSON.parse(row.checklist || '[]') : (row.checklist || []);
+  } catch {
     checklist = [];
   }
   let location = null;
   try {
-    location = row.location ? JSON.parse(row.location) : null;
-  } catch (e) {
+    location = typeof row.location === 'string' ? JSON.parse(row.location) : (row.location || null);
+  } catch {
     location = null;
   }
   return { ...row, tags, checklist, location };
 }
 
+// 5. HTTP Server Request Router
 const server = http.createServer(async (req, res) => {
   // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -201,12 +271,32 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
 
+  // GET /api/health
+  if (pathname === '/api/health' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'ok',
+      database: isDbConnected ? 'MySQL' : 'MemoryCache',
+      connected: isDbConnected,
+      host: DB_HOST,
+      port: DB_PORT,
+      databaseName: DB_NAME,
+      time: new Date().toISOString(),
+    }));
+    return;
+  }
+
   // GET /api/members
   if (pathname === '/api/members' && req.method === 'GET') {
     try {
-      const rows = db.prepare('SELECT * FROM members ORDER BY created_at ASC').all();
+      if (isDbConnected && pool) {
+        const [rows] = await pool.query('SELECT * FROM members ORDER BY created_at ASC');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(rows.map(formatRow)));
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(rows.map(formatRow)));
+      res.end(JSON.stringify(memoryMembers.map(formatRow)));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
@@ -217,14 +307,31 @@ const server = http.createServer(async (req, res) => {
   // GET /api/members/:id
   if (pathname.startsWith('/api/members/') && req.method === 'GET') {
     const id = pathname.replace('/api/members/', '');
-    const row = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
-    if (!row) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Member not found' }));
-      return;
+    try {
+      if (isDbConnected && pool) {
+        const [rows] = await pool.query('SELECT * FROM members WHERE id = ?', [id]);
+        if (!rows || rows.length === 0) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Member not found' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatRow(rows[0])));
+        return;
+      }
+
+      const found = memoryMembers.find((m) => m.id === id);
+      if (!found) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Member not found' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(formatRow(found)));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
     }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(formatRow(row)));
     return;
   }
 
@@ -247,18 +354,40 @@ const server = http.createServer(async (req, res) => {
       const room_desc = data.room_desc || 'A freshly prepared cozy room with warm lighting.';
       const room_status = data.room_status || 'Settling happily into the family home!';
       const quote = data.quote || 'Home is where love resides and memories blossom.';
-
       const image_url = data.image_url || null;
       const mobile_number = String(data.mobile_number).trim();
 
-      db.prepare(`
-        INSERT INTO members (id, name, mobile_number, caricature_key, image_url, role, bio, tags, room_title, room_desc, room_status, quote, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, data.name, mobile_number, caricature_key, image_url, role, bio, tags, room_title, room_desc, room_status, quote, now, now);
+      if (isDbConnected && pool) {
+        await pool.query(
+          `INSERT INTO members (id, name, mobile_number, caricature_key, image_url, role, bio, tags, room_title, room_desc, room_status, quote, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, data.name, mobile_number, caricature_key, image_url, role, bio, tags, room_title, room_desc, room_status, quote, now, now]
+        );
+        const [rows] = await pool.query('SELECT * FROM members WHERE id = ?', [id]);
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatRow(rows[0])));
+        return;
+      }
 
-      const created = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
+      const newRecord = {
+        id,
+        name: data.name,
+        mobile_number,
+        caricature_key,
+        image_url,
+        role,
+        bio,
+        tags,
+        room_title,
+        room_desc,
+        room_status,
+        quote,
+        created_at: now,
+        updated_at: now,
+      };
+      memoryMembers.push(newRecord);
       res.writeHead(201, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(formatRow(created)));
+      res.end(JSON.stringify(formatRow(newRecord)));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
@@ -270,45 +399,98 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/members/') && req.method === 'PUT') {
     try {
       const id = pathname.replace('/api/members/', '');
-      const existing = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
-      if (!existing) {
+      const data = await parseJsonBody(req);
+      const now = new Date().toISOString();
+
+      if (isDbConnected && pool) {
+        const [existing] = await pool.query('SELECT * FROM members WHERE id = ?', [id]);
+        if (!existing || existing.length === 0) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Member not found' }));
+          return;
+        }
+        const curr = existing[0];
+        const tagsJson = data.tags !== undefined ? JSON.stringify(data.tags) : curr.tags;
+        const checklistJson = data.checklist !== undefined ? JSON.stringify(data.checklist) : curr.checklist;
+        const locationJson = data.location !== undefined ? JSON.stringify(data.location) : curr.location;
+
+        await pool.query(
+          `UPDATE members SET
+             name = ?, mobile_number = ?, caricature_key = ?, image_url = ?, role = ?, bio = ?, tags = ?,
+             room_title = ?, room_desc = ?, room_status = ?, room_notes = ?, checklist = ?, location = ?, quote = ?, updated_at = ?
+           WHERE id = ?`,
+          [
+            data.name ?? curr.name,
+            data.mobile_number !== undefined ? String(data.mobile_number).trim() : curr.mobile_number,
+            data.caricature_key ?? curr.caricature_key,
+            data.image_url !== undefined ? data.image_url : curr.image_url,
+            data.role ?? curr.role,
+            data.bio ?? curr.bio,
+            tagsJson,
+            data.room_title ?? curr.room_title,
+            data.room_desc ?? curr.room_desc,
+            data.room_status ?? curr.room_status,
+            data.room_notes !== undefined ? data.room_notes : curr.room_notes,
+            checklistJson,
+            locationJson,
+            data.quote ?? curr.quote,
+            now,
+            id,
+          ]
+        );
+        const [updatedRows] = await pool.query('SELECT * FROM members WHERE id = ?', [id]);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatRow(updatedRows[0])));
+        return;
+      }
+
+      const idx = memoryMembers.findIndex((m) => m.id === id);
+      if (idx === -1) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Member not found' }));
         return;
       }
-      const data = await parseJsonBody(req);
-      const now = new Date().toISOString();
-      const tagsJson = data.tags ? JSON.stringify(data.tags) : existing.tags;
-      const checklistJson = data.checklist !== undefined ? JSON.stringify(data.checklist) : existing.checklist;
-      const locationJson = data.location !== undefined ? JSON.stringify(data.location) : existing.location;
-
-      db.prepare(`
-        UPDATE members SET
-          name = ?, mobile_number = ?, caricature_key = ?, image_url = ?, role = ?, bio = ?, tags = ?,
-          room_title = ?, room_desc = ?, room_status = ?, room_notes = ?, checklist = ?, location = ?, quote = ?, updated_at = ?
-        WHERE id = ?
-      `).run(
-        data.name ?? existing.name,
-        data.mobile_number !== undefined ? String(data.mobile_number).trim() : existing.mobile_number,
-        data.caricature_key ?? existing.caricature_key,
-        data.image_url !== undefined ? data.image_url : existing.image_url,
-        data.role ?? existing.role,
-        data.bio ?? existing.bio,
-        tagsJson,
-        data.room_title ?? existing.room_title,
-        data.room_desc ?? existing.room_desc,
-        data.room_status ?? existing.room_status,
-        data.room_notes !== undefined ? data.room_notes : existing.room_notes,
-        checklistJson,
-        locationJson,
-        data.quote ?? existing.quote,
-        now,
-        id
-      );
-
-      const updated = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
+      memoryMembers[idx] = {
+        ...memoryMembers[idx],
+        ...data,
+        tags: data.tags !== undefined ? JSON.stringify(data.tags) : memoryMembers[idx].tags,
+        updated_at: now,
+      };
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(formatRow(updated)));
+      res.end(JSON.stringify(formatRow(memoryMembers[idx])));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // DELETE /api/members/:id
+  if (pathname.startsWith('/api/members/') && req.method === 'DELETE') {
+    try {
+      const id = pathname.replace('/api/members/', '');
+
+      if (isDbConnected && pool) {
+        const [countRows] = await pool.query('SELECT COUNT(*) AS total FROM members');
+        if (countRows[0].total <= 1) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Cannot delete: Database requires at least 1 family record.' }));
+          return;
+        }
+        await pool.query('DELETE FROM members WHERE id = ?', [id]);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, deletedId: id, message: 'Member deleted successfully.' }));
+        return;
+      }
+
+      if (memoryMembers.length <= 1) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Cannot delete: Database requires at least 1 family record.' }));
+        return;
+      }
+      memoryMembers = memoryMembers.filter((m) => m.id !== id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, deletedId: id }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
@@ -328,36 +510,43 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // 1. Admin login with mobile number 2000
+      // Admin Login
       if (cleanPhone === '2000') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           role: 'admin',
           name: 'Admin',
           mobile_number: '2000',
-          message: 'Welcome Admin!'
+          message: 'Welcome Admin!',
         }));
         return;
       }
 
-      // 2. Member login by mobile number
-      const row = db.prepare('SELECT * FROM members WHERE TRIM(mobile_number) = ? OR mobile_number = ?').get(cleanPhone, cleanPhone);
-      if (row) {
+      // Member Login
+      let matched = null;
+      if (isDbConnected && pool) {
+        const [rows] = await pool.query('SELECT * FROM members WHERE TRIM(mobile_number) = ?', [cleanPhone]);
+        if (rows.length > 0) matched = rows[0];
+      } else {
+        matched = memoryMembers.find((m) => String(m.mobile_number).trim() === cleanPhone);
+      }
+
+      if (matched) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           role: 'member',
-          name: row.name,
-          mobile_number: row.mobile_number,
-          memberId: row.id,
-          member: formatRow(row),
-          message: `Welcome back, ${row.name}!`
+          name: matched.name,
+          mobile_number: matched.mobile_number,
+          memberId: matched.id,
+          member: formatRow(matched),
+          message: `Welcome back, ${matched.name}!`,
         }));
         return;
       }
 
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        error: 'Mobile number not found. Enter "2000" for Admin or your registered member mobile number.'
+        error: 'Mobile number not found. Enter "2000" for Admin or your registered member mobile number.',
       }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -369,9 +558,14 @@ const server = http.createServer(async (req, res) => {
   // GET /api/gallery
   if (pathname === '/api/gallery' && req.method === 'GET') {
     try {
-      const rows = db.prepare('SELECT * FROM gallery ORDER BY created_at DESC').all();
+      if (isDbConnected && pool) {
+        const [rows] = await pool.query('SELECT * FROM gallery ORDER BY created_at DESC');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(rows));
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(rows));
+      res.end(JSON.stringify(memoryGallery));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
@@ -379,7 +573,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /api/gallery (Add images only)
+  // POST /api/gallery
   if (pathname === '/api/gallery' && req.method === 'POST') {
     try {
       const data = await parseJsonBody(req);
@@ -388,20 +582,26 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'Image data is required.' }));
         return;
       }
-
       const id = 'img_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
       const now = new Date().toISOString();
       const title = (data.title || 'Family Memory').trim();
       const uploaded_by = (data.uploaded_by || 'Family Member').trim();
 
-      db.prepare(`
-        INSERT INTO gallery (id, image_data, title, uploaded_by, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(id, data.image_data, title, uploaded_by, now);
+      if (isDbConnected && pool) {
+        await pool.query(
+          `INSERT INTO gallery (id, image_data, title, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?)`,
+          [id, data.image_data, title, uploaded_by, now]
+        );
+        const [rows] = await pool.query('SELECT * FROM gallery WHERE id = ?', [id]);
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(rows[0]));
+        return;
+      }
 
-      const created = db.prepare('SELECT * FROM gallery WHERE id = ?').get(id);
+      const item = { id, image_data: data.image_data, title, uploaded_by, created_at: now };
+      memoryGallery.unshift(item);
       res.writeHead(201, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(created));
+      res.end(JSON.stringify(item));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
@@ -413,7 +613,11 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/gallery/') && req.method === 'DELETE') {
     try {
       const id = pathname.replace('/api/gallery/', '');
-      db.prepare('DELETE FROM gallery WHERE id = ?').run(id);
+      if (isDbConnected && pool) {
+        await pool.query('DELETE FROM gallery WHERE id = ?', [id]);
+      } else {
+        memoryGallery = memoryGallery.filter((i) => i.id !== id);
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, deletedId: id }));
     } catch (err) {
@@ -423,53 +627,30 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // DELETE /api/members/:id
-  if (pathname.startsWith('/api/members/') && req.method === 'DELETE') {
+  // POST /api/reset
+  if (pathname === '/api/reset' && req.method === 'POST') {
     try {
-      const id = pathname.replace('/api/members/', '');
-      const countRow = db.prepare('SELECT COUNT(*) AS total FROM members').get();
-      if (countRow.total <= 1) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Cannot delete: SQLite database requires at least 1 family record.' }));
-        return;
+      if (isDbConnected && pool) {
+        await pool.query('DELETE FROM members');
+        for (const m of DEFAULT_MEMBERS) {
+          await pool.query(
+            `INSERT INTO members (id, name, mobile_number, caricature_key, role, bio, tags, room_title, room_desc, room_status, quote, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [m.id, m.name, m.mobile_number, m.caricature_key, m.role, m.bio, m.tags, m.room_title, m.room_desc, m.room_status, m.quote, m.created_at, m.updated_at]
+          );
+        }
       }
-
-      const existing = db.prepare('SELECT name FROM members WHERE id = ?').get(id);
-      const memberName = existing ? existing.name : 'Member';
-
-      const result = db.prepare('DELETE FROM members WHERE id = ?').run(id);
-      console.log(`🗑️ Deleted ${id} (${memberName}) from SQLite database. Changes: ${result.changes}`);
-
+      memoryMembers = [...DEFAULT_MEMBERS];
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        success: true,
-        deletedId: id,
-        message: `Database Success: Member "${memberName}" removed successfully from database.`
-      }));
+      res.end(JSON.stringify({ success: true }));
     } catch (err) {
-      console.error('Delete error:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
     return;
   }
 
-  // POST /api/reset
-  if (pathname === '/api/reset' && req.method === 'POST') {
-    db.exec('DELETE FROM members');
-    const insertStmt = db.prepare(`
-      INSERT INTO members (id, name, caricature_key, role, bio, tags, room_title, room_desc, room_status, quote, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const m of DEFAULT_MEMBERS) {
-      insertStmt.run(m.id, m.name, m.caricature_key, m.role, m.bio, m.tags, m.room_title, m.room_desc, m.room_status, m.quote, m.created_at, m.updated_at);
-    }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true }));
-    return;
-  }
-
-  // Static File Serving (from ../dist if built, otherwise ../index.html)
+  // 6. Static File Serving (SPA Fallback)
   let staticFile = path.join(DIST_PATH, pathname === '/' ? 'index.html' : pathname);
   if (!fs.existsSync(staticFile) || !fs.statSync(staticFile).isFile()) {
     staticFile = path.join(__dirname, '..', pathname === '/' ? 'index.html' : pathname);
@@ -485,12 +666,11 @@ const server = http.createServer(async (req, res) => {
       '.svg': 'image/svg+xml',
       '.png': 'image/png',
       '.webp': 'image/webp',
-      '.ico': 'image/x-icon'
+      '.ico': 'image/x-icon',
     };
     res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' });
     fs.createReadStream(staticFile).pipe(res);
   } else if (fs.existsSync(path.join(DIST_PATH, 'index.html'))) {
-    // Single Page Application (SPA) fallback
     res.writeHead(200, { 'Content-Type': 'text/html' });
     fs.createReadStream(path.join(DIST_PATH, 'index.html')).pipe(res);
   } else {
@@ -500,6 +680,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🏡 Family Home Server Running on http://localhost:${PORT}`);
-  console.log(`💾 Database: SQLite (${DB_PATH})`);
+  console.log(`🏡 Family Home Server running on http://localhost:${PORT}`);
+  console.log(`📡 Connecting to MySQL database at ${DB_HOST}:${DB_PORT} (DB: ${DB_NAME})`);
 });
