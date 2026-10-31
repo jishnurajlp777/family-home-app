@@ -128,16 +128,24 @@ let pool = null;
 let isDbConnected = false;
 
 async function initMySQL() {
+  const isRemote = DB_HOST !== 'localhost' && DB_HOST !== '127.0.0.1';
+  const sslConfig = isRemote ? { rejectUnauthorized: false } : undefined;
+
   try {
-    // 1. Connect without database first to ensure DB exists
-    const rootConn = await mysql.createConnection({
-      host: DB_HOST,
-      port: DB_PORT,
-      user: DB_USER,
-      password: DB_PASSWORD,
-    });
-    await rootConn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-    await rootConn.end();
+    // 1. Attempt creating database if host permits (e.g. local MySQL)
+    try {
+      const rootConn = await mysql.createConnection({
+        host: DB_HOST,
+        port: DB_PORT,
+        user: DB_USER,
+        password: DB_PASSWORD,
+        ssl: sslConfig,
+      });
+      await rootConn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      await rootConn.end();
+    } catch {
+      // Cloud providers (e.g. TiDB) provide a pre-created database
+    }
 
     // 2. Create pooled connection
     pool = mysql.createPool({
@@ -150,6 +158,7 @@ async function initMySQL() {
       connectionLimit: 10,
       queueLimit: 0,
       enableKeepAlive: true,
+      ssl: sslConfig,
     });
 
     // 3. Initialize Tables
