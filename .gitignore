@@ -23,8 +23,13 @@ android/build/
 android/local.properties
 android/.gradle/
 android/capacitor-cordova-android-plugins/build/
+*.apk
+!releases/**/*.apk
+!FamilyHome.apk
 
-# SQLite & local databases
+# Local database & server fallback disk storage
+# server/server_data.json is kept fresh
+!server/server_data.json
 *.db-journal
 *.db-wal
 *.db-shm

@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0\.."
 title Push Changes to GitHub
 echo ========================================================
 echo   Pushing Family Home Updates to GitHub...
@@ -15,7 +16,7 @@ if %ERRORLEVEL% equ 0 (
 ) else (
     echo.
     echo [NOTICE] If git push asked for login or rejected:
-    echo 1. Run login_github.bat first to authorize GitHub.
+    echo 1. Run scripts\login_github.bat first to authorize GitHub.
     echo 2. Then run this script again.
 )
 echo.

@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0\.."
 title GitHub Sign In for Family Home
 echo ========================================================
 echo   Connecting your GitHub Account...

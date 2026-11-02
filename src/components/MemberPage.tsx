@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FamilyMember, CaricatureType, ChecklistItem, AuthUser } from '../types/member';
 import { Caricature } from './Caricature';
+import { FamilyGallery } from './FamilyGallery';
 
 interface MemberPageProps {
   member: FamilyMember;
@@ -10,9 +11,10 @@ interface MemberPageProps {
   onQuickEdit: (member: FamilyMember) => void;
   onUpdateMember?: (id: string, updates: Partial<FamilyMember>) => Promise<void>;
   currentUser?: AuthUser;
+  onShowToast?: (message: string, type?: 'success' | 'error') => void;
 }
 
-type TabType = 'about' | 'room';
+type TabType = 'about' | 'room' | 'gallery';
 
 const CARICATURE_THEMES: Record<
   CaricatureType,
@@ -68,6 +70,7 @@ export const MemberPage: React.FC<MemberPageProps> = ({
   onQuickEdit,
   onUpdateMember,
   currentUser,
+  onShowToast,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('about');
 
@@ -92,18 +95,45 @@ export const MemberPage: React.FC<MemberPageProps> = ({
   const theme = CARICATURE_THEMES[member.caricature_key] || CARICATURE_THEMES.boy;
   const otherMembers = allMembers.filter((m) => m.id !== member.id);
 
-  // Quick image add/upload handler
+  // Quick image add/upload handler with client-side compression
   const handleQuickImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && onUpdateMember) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          onUpdateMember(member.id, { image_url: reader.result });
+    if (!file || !onUpdateMember) return;
+
+    if (!file.type.startsWith('image/')) {
+      if (onShowToast) onShowToast('Only image files are allowed.', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 800;
+        let w = img.width;
+        let h = img.height;
+        if (w > h && w > MAX) {
+          h = Math.round((h * MAX) / w);
+          w = MAX;
+        } else if (h > MAX) {
+          w = Math.round((w * MAX) / h);
+          h = MAX;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressed = canvas.toDataURL('image/jpeg', 0.82);
+          onUpdateMember(member.id, { image_url: compressed });
+          if (onShowToast) onShowToast('Profile photo updated!', 'success');
         }
       };
-      reader.readAsDataURL(file);
-    }
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   // Quick image remove handler
@@ -423,6 +453,18 @@ export const MemberPage: React.FC<MemberPageProps> = ({
               <span>🛋️</span>
               <span>My Room</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('gallery')}
+              className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                activeTab === 'gallery'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span>📸</span>
+              <span>Family Gallery</span>
+            </button>
           </div>
 
           {/* Tab 1: About & Story View */}
@@ -564,6 +606,18 @@ export const MemberPage: React.FC<MemberPageProps> = ({
                   </button>
                 </form>
               </div>
+            </div>
+          )}
+
+          {/* Tab 3: Family Gallery View (Accessible to members: view/upload all, delete own only) */}
+          {activeTab === 'gallery' && (
+            <div className="animate-fadeIn">
+              <FamilyGallery
+                currentUserName={currentUser?.name || member.name}
+                currentUserRole={currentUser?.role || 'member'}
+                currentUserId={currentUser?.memberId || member.id}
+                onShowToast={onShowToast || ((_msg, _type) => {})}
+              />
             </div>
           )}
         </div>

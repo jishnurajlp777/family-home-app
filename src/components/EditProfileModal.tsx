@@ -100,7 +100,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
       return;
     }
     if (cleanPhone === '2000') {
-      setError('Mobile number "2000" is reserved for Admin login.');
+      setError('This number format is reserved. Please enter a valid mobile phone number.');
       return;
     }
 

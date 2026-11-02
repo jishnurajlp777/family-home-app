@@ -39,26 +39,89 @@ export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
     loadGallery();
   }, [loadGallery]);
 
+  // Compress high-resolution photos client-side to guarantee fast, reliable uploads
+  const compressImageFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Failed to read image file'));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('Invalid image file'));
+        img.onload = () => {
+          const MAX_WIDTH = 1200;
+          const MAX_HEIGHT = 1200;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height = Math.round((height * MAX_WIDTH) / width);
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width = Math.round((width * MAX_HEIGHT) / height);
+              height = MAX_HEIGHT;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(reader.result as string);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          resolve(compressedDataUrl);
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // RBAC Permission: Home can delete ALL photos; Members can delete ONLY their own uploads
+  const canUserDelete = (item: GalleryItem): boolean => {
+    if (currentUserRole === 'admin' || currentUserRole === 'super_admin') {
+      return true; // Home Admin has full delete permissions
+    }
+    if (currentUserRole === 'member') {
+      if (item.uploaded_by_id && currentUserId && String(item.uploaded_by_id).trim() === String(currentUserId).trim()) {
+        return true;
+      }
+      if (item.uploaded_by && currentUserName && item.uploaded_by.trim().toLowerCase() === currentUserName.trim().toLowerCase()) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   // Handle image file selection
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Strict validation: Only images allowed
     if (!file.type.startsWith('image/')) {
-      onShowToast('Please select an image file only (PNG, JPG, WebP, etc.)', 'error');
+      onShowToast('Only image files are allowed (JPEG, PNG, WebP, GIF).', 'error');
+      e.target.value = '';
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setPreviewDataUrl(reader.result);
-        setPhotoTitle(file.name.replace(/\.[^/.]+$/, ''));
-        setIsUploadModalOpen(true);
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    try {
+      const compressed = await compressImageFile(file);
+      setPreviewDataUrl(compressed);
+      setPhotoTitle(file.name.replace(/\.[^/.]+$/, ''));
+      setIsUploadModalOpen(true);
+    } catch {
+      onShowToast('Could not process image. Please try another photo.', 'error');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleSavePhoto = async (e: React.FormEvent) => {
@@ -175,13 +238,13 @@ export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
                 </div>
               </div>
 
-              {/* Delete button (Admin or own uploads only) */}
-              {(currentUserRole === 'admin' || (item.uploaded_by_id && item.uploaded_by_id === currentUserId) || item.uploaded_by === currentUserName) && (
+              {/* Delete button (Home can delete all records; Member can delete his/her own record only) */}
+              {canUserDelete(item) && (
                 <button
                   type="button"
                   onClick={(e) => handleDeletePhoto(item.id, e)}
                   title="Delete photo"
-                  className="absolute top-2 right-2 w-6 h-6 rounded-lg bg-slate-900/60 hover:bg-rose-600 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition shadow-md"
+                  className="absolute top-2 right-2 w-6 h-6 rounded-lg bg-slate-900/70 hover:bg-rose-600 text-white flex items-center justify-center text-xs opacity-80 sm:opacity-0 group-hover:opacity-100 transition shadow-md"
                 >
                   ✕
                 </button>
@@ -285,11 +348,11 @@ export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
                   Uploaded by {selectedImage.uploaded_by || 'Family Member'} • {new Date(selectedImage.created_at).toLocaleDateString()}
                 </p>
               </div>
-              {(currentUserRole === 'admin' || (selectedImage.uploaded_by_id && selectedImage.uploaded_by_id === currentUserId) || selectedImage.uploaded_by === currentUserName) && (
+              {canUserDelete(selectedImage) && (
                 <button
                   type="button"
                   onClick={(e) => handleDeletePhoto(selectedImage.id, e)}
-                  className="text-xs text-rose-400 hover:text-rose-300 font-bold px-3 py-1.5 rounded-lg border border-rose-800 hover:bg-rose-950/50 transition"
+                  className="text-xs text-rose-400 hover:text-rose-300 font-bold px-3 py-1.5 rounded-lg border border-rose-800 hover:bg-rose-950/50 transition cursor-pointer"
                 >
                   Delete Photo
                 </button>

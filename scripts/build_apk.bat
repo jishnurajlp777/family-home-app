@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0\.."
 echo ===================================================
 echo   Family Home App - Android APK Build Pipeline
 echo ===================================================
@@ -35,7 +36,6 @@ if exist gradlew.bat (
         echo.
         echo [NOTICE] If Gradle failed with "SDK location not found",
         echo open the 'android' folder in Android Studio once or set ANDROID_HOME.
-        echo Alternatively, push to GitHub to build via the included GitHub Actions workflow!
     )
 ) else (
     echo [ERROR] gradlew.bat not found in android directory!

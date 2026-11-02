@@ -79,7 +79,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
       return;
     }
     if (cleanPhone === '2000') {
-      setError('Mobile number "2000" is reserved for Admin login. Please enter a different number.');
+      setError('This number format is reserved. Please enter a valid mobile phone number.');
       return;
     }
 

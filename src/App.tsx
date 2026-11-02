@@ -1,24 +1,30 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { App as CapApp } from '@capacitor/app';
-import { FamilyMember, NewMemberInput, AuthUser } from './types/member';
+import { FamilyMember, NewMemberInput, AuthUser, Home, ActiveCall } from './types/member';
 import { FamilyService } from './services/api';
 import { HomePage } from './components/HomePage';
 import { MemberPage } from './components/MemberPage';
+import { SuperAdminDashboard } from './components/SuperAdminDashboard';
+import { SuperAdminHomeAuditView } from './components/SuperAdminHomeAuditView';
 import { AddMemberModal } from './components/AddMemberModal';
 import { EditProfileModal } from './components/EditProfileModal';
 import { LoginScreen } from './components/LoginScreen';
 import { Toast } from './components/Toast';
+import { FamilyCallingModal } from './components/FamilyCallingModal';
 
 export const App: React.FC = () => {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(FamilyService.getCurrentUser());
   const [activeMemberId, setActiveMemberId] = useState<string | null>(null);
+  const [selectedAuditHome, setSelectedAuditHome] = useState<Home | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
   const [pendingCardDeleteMember, setPendingCardDeleteMember] = useState<FamilyMember | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState<boolean>(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
+  const [isCallModalOpen, setIsCallModalOpen] = useState<boolean>(false);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -29,8 +35,13 @@ export const App: React.FC = () => {
 
   const refreshMembers = useCallback(async () => {
     try {
-      const data = await FamilyService.getAll();
-      setMembers(data);
+      const activeUser = FamilyService.getCurrentUser();
+      if (!activeUser || (!activeUser.homeId && activeUser.role !== 'super_admin')) {
+        setMembers([]);
+        return;
+      }
+      const data = await FamilyService.getAll(activeUser.homeId);
+      setMembers(FamilyService.deduplicateMembers(data));
     } catch {
       showToast('Failed to load family members', 'error');
     }
@@ -40,14 +51,18 @@ export const App: React.FC = () => {
   useEffect(() => {
     const initApp = async () => {
       await FamilyService.checkConnection();
-      await refreshMembers();
+      const activeUser = FamilyService.getCurrentUser();
+      if (activeUser && activeUser.homeId) {
+        await refreshMembers();
+      } else {
+        setMembers([]);
+      }
 
       // Read initial hash from URL if authenticated
       const hash = window.location.hash;
       if (hash.startsWith('#member/')) {
         const id = hash.replace('#member/', '');
-        const user = FamilyService.getCurrentUser();
-        if (user && (user.role === 'admin' || user.memberId === id)) {
+        if (activeUser && (activeUser.role === 'admin' || activeUser.memberId === id)) {
           setActiveMemberId(id);
         }
       }
@@ -75,18 +90,21 @@ export const App: React.FC = () => {
   useEffect(() => {
     const syncTimer = setInterval(async () => {
       try {
-        const latest = await FamilyService.getAll();
+        const auth = FamilyService.getCurrentUser();
+        if (!auth || (!auth.homeId && auth.role !== 'super_admin')) return;
+
+        const latest = await FamilyService.getAll(auth.homeId);
+        const deduplicated = FamilyService.deduplicateMembers(latest);
         setMembers((prev) => {
-          if (JSON.stringify(prev) !== JSON.stringify(latest)) {
-            return latest;
+          if (JSON.stringify(prev) !== JSON.stringify(deduplicated)) {
+            return deduplicated;
           }
           return prev;
         });
 
         // Sync active user if their profile was updated elsewhere
-        const auth = FamilyService.getCurrentUser();
         if (auth && auth.role === 'member') {
-          const me = latest.find((m) => m.id === auth.memberId || m.mobile_number === auth.mobile_number);
+          const me = deduplicated.find((m) => m.id === auth.memberId || m.mobile_number === auth.mobile_number);
           if (me && (me.name !== auth.name || me.mobile_number !== auth.mobile_number)) {
             const updatedAuth: AuthUser = {
               ...auth,
@@ -97,6 +115,28 @@ export const App: React.FC = () => {
             FamilyService.setCurrentUser(updatedAuth);
             setCurrentUser(updatedAuth);
           }
+        }
+
+        // Real-Time Internet Calling check
+        const call = await FamilyService.getActiveCall();
+        if (call && call.status !== 'ended') {
+          const myId = auth.memberId || (auth.role === 'admin' ? 'admin' : 'member');
+          const isTarget = call.target_id === 'all' || call.target_id === myId || call.caller_id === myId;
+          if (isTarget) {
+            setActiveCall(call);
+            // If caller or callee ringing, automatically open modal
+            if (call.status === 'ringing') {
+              setIsCallModalOpen(true);
+            }
+          }
+        } else {
+          setActiveCall((prev) => {
+            if (prev && prev.status !== 'ended') {
+              setIsCallModalOpen(false);
+              return null;
+            }
+            return prev;
+          });
         }
       } catch {}
     }, 2500);
@@ -111,6 +151,102 @@ export const App: React.FC = () => {
       window.removeEventListener('storage', handleStorageChange);
     };
   }, [refreshMembers]);
+
+  // Live Automatic GPS Location Sharing for logged-in members
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'member' || !currentUser.memberId) {
+      return;
+    }
+
+    const memberId = currentUser.memberId;
+    let watchId: number | null = null;
+    let lastCoords = { lat: 0, lng: 0, time: 0 };
+
+    const pushLocation = async (lat: number, lng: number) => {
+      const now = Date.now();
+      // Throttle updates: send if moved > 0.0001 deg (~10m) or 20 seconds elapsed
+      const dist = Math.hypot(lat - lastCoords.lat, lng - lastCoords.lng);
+      if (dist < 0.0001 && now - lastCoords.time < 20000) {
+        return;
+      }
+      lastCoords = { lat, lng, time: now };
+
+      try {
+        const newLocation = {
+          name: 'Live Location',
+          address: `${lat.toFixed(4)}°, ${lng.toFixed(4)}°`,
+          lat,
+          lng,
+          updated_at: 'Just now',
+          status: 'Active on map',
+        };
+        await FamilyService.update(memberId, { location: newLocation });
+        FamilyService.recordLocationUsage(memberId).catch(() => {});
+      } catch {}
+    };
+
+    if ('geolocation' in navigator) {
+      // 1. Immediate position capture on login
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          pushLocation(pos.coords.latitude, pos.coords.longitude);
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+
+      // 2. Continuous watchPosition
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          pushLocation(pos.coords.latitude, pos.coords.longitude);
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+      );
+    }
+
+    // 3. Periodic fallback timer ensuring updates keep broadcasting even if stationary or minimized
+    const heartbeatTimer = setInterval(() => {
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            pushLocation(pos.coords.latitude, pos.coords.longitude);
+          },
+          () => {},
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+        );
+      }
+    }, 20000);
+
+    // 4. Capacitor App State Listener: app minimizing does not stop location sharing
+    let appStateListener: any = null;
+    try {
+      appStateListener = CapApp.addListener('appStateChange', (state) => {
+        if (!state.isActive) {
+          if ('geolocation' in navigator) {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                pushLocation(pos.coords.latitude, pos.coords.longitude);
+              },
+              () => {},
+              { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+          }
+        }
+      });
+    } catch {}
+
+    // Cleanup: Automatically stop location sharing on logout
+    return () => {
+      if (watchId !== null && 'geolocation' in navigator) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      clearInterval(heartbeatTimer);
+      if (appStateListener && typeof appStateListener.remove === 'function') {
+        appStateListener.remove();
+      }
+    };
+  }, [currentUser?.memberId, currentUser?.role]);
 
   // Capacitor Android Back Button & Exit App Confirmation
   useEffect(() => {
@@ -150,7 +286,7 @@ export const App: React.FC = () => {
   // Navigation handlers
   const handleOpenMemberPage = (id: string) => {
     if (currentUser?.role === 'member' && id !== currentUser.memberId) {
-      showToast('Restricted: You can only view your own details. Log in as Admin (2000) to view all profiles.', 'error');
+      showToast('Restricted: You can only view your own details. Contact your home.', 'error');
       return;
     }
     setActiveMemberId(id);
@@ -209,12 +345,12 @@ export const App: React.FC = () => {
 
   const handleDeleteMember = async (id: string) => {
     try {
-      const result = await FamilyService.delete(id);
+      await FamilyService.delete(id);
       await refreshMembers();
       if (activeMemberId === id) {
         handleBackToHome();
       }
-      showToast(result.message || 'Member removed successfully.', 'success');
+      showToast('Member removed successfully.', 'success');
     } catch (err: unknown) {
       const error = err as Error;
       showToast(error.message || 'Could not delete member.', 'error');
@@ -252,33 +388,74 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (mobileNumber: string) => {
-    try {
-      const user = await FamilyService.login(mobileNumber);
-      setCurrentUser(user);
-      await refreshMembers();
-      showToast(`Welcome ${user.name}!`, 'success');
-    } catch (err: unknown) {
-      const error = err as Error;
-      throw error;
+  const handleLoginSuccess = async (user: AuthUser) => {
+    setCurrentUser(user);
+    if (user.role !== 'super_admin' && user.homeId) {
+      const data = await FamilyService.getAll(user.homeId);
+      setMembers(FamilyService.deduplicateMembers(data));
+    } else {
+      setMembers([]);
     }
+    showToast(`Welcome ${user.name}!`, 'success');
   };
 
   const handleLogout = () => {
     FamilyService.logout();
     setCurrentUser(null);
+    setMembers([]);
     setActiveMemberId(null);
+    setSelectedAuditHome(null);
+    setActiveCall(null);
+    setIsCallModalOpen(false);
     window.location.hash = '';
     showToast('Logged out successfully.', 'success');
+  };
+
+  const handleTriggerCall = async (targetId: string = 'all') => {
+    try {
+      const call = await FamilyService.startCall(targetId);
+      setActiveCall(call);
+      setIsCallModalOpen(true);
+      showToast('📞 Initiating internet call...', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Could not start call.', 'error');
+    }
   };
 
   // If not logged in, show Login Screen
   if (!currentUser) {
     return (
       <>
-        <LoginScreen members={members} onLogin={handleLogin} />
+        <LoginScreen onLoginSuccess={handleLoginSuccess} />
         {toast && <Toast message={toast.message} type={toast.type} />}
       </>
+    );
+  }
+
+  // Super Admin Platform View
+  if (currentUser.role === 'super_admin') {
+    if (selectedAuditHome) {
+      return (
+        <div className="min-h-screen bg-slate-900 text-slate-100 p-4 sm:p-6 lg:p-8 font-sans">
+          {toast && <Toast message={toast.message} type={toast.type} />}
+          <SuperAdminHomeAuditView
+            home={selectedAuditHome}
+            onBack={() => setSelectedAuditHome(null)}
+            onShowToast={showToast}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 p-4 sm:p-6 lg:p-8 font-sans">
+        {toast && <Toast message={toast.message} type={toast.type} />}
+        <SuperAdminDashboard
+          onLogout={handleLogout}
+          onShowToast={showToast}
+          onEnterHomeAudit={(home) => setSelectedAuditHome(home)}
+        />
+      </div>
     );
   }
 
@@ -299,6 +476,7 @@ export const App: React.FC = () => {
           onQuickEdit={handleOpenEditModal}
           onUpdateMember={handleUpdateMemberDetails}
           currentUser={currentUser}
+          onShowToast={showToast}
         />
       ) : (
         <HomePage
@@ -312,6 +490,8 @@ export const App: React.FC = () => {
           onShowToast={showToast}
           onRefresh={refreshMembers}
           onUpdateLocation={handleUpdateLocation}
+          onTriggerCall={handleTriggerCall}
+          activeCall={activeCall}
         />
       )}
 
@@ -408,6 +588,22 @@ export const App: React.FC = () => {
           member={editingMember}
           allMembers={members}
           onSave={handleUpdateMemberDetails}
+        />
+      )}
+
+      {/* Real-time Internet Calling Modal */}
+      {currentUser && (
+        <FamilyCallingModal
+          currentUser={currentUser}
+          homeMembers={members}
+          activeCall={activeCall}
+          isOpen={isCallModalOpen}
+          onClose={() => setIsCallModalOpen(false)}
+          onCallEnded={() => {
+            setActiveCall(null);
+            setIsCallModalOpen(false);
+          }}
+          onShowToast={showToast}
         />
       )}
     </div>

@@ -1,132 +1,202 @@
 # 🏡 Family Home App — Software Requirements Specification (SRS)
+## Version 0.2 (Multi-Tenant Platform with Super Admin & Home Registration)
 
-**Document Version:** 1.1.0  
-**Project Name:** Family Home App (Web Application & Android APK)  
-**Last Updated:** October 2026  
+**Document Version:** 0.2.0  
+**Project Name:** Family Home App (Multi-Tenant Web Application & Android APK)  
+**Last Updated:** November 2026  
 **Status:** Approved & Implemented (Local Environment)  
 
 ---
 
-## 1. Executive Summary & Objectives
+## 1. Version History & Changelog
 
-### 1.1 Purpose
-The **Family Home App** is a private, family-centric collaborative platform designed to keep household members connected. It combines real-time status updates, personal room management, interactive to-do checklists, live location sharing, and shared photo galleries in a secure, intuitive visual interface.
-
-### 1.2 Core Design Principles
-* **Privacy by Design:** Zero public discoverability; access restricted strictly to registered family mobile numbers.
-* **Master Admin Control:** One master administrative user authenticated via phone number `2000`. No initial default members; records are added dynamically by the Admin.
-* **Real-Time Cross-Device Synchronization:** Updates to member details, statuses, checklists, or memories reflect simultaneously across all active client apps.
-* **Offline-First Resilience:** Instant loading via local client storage caching, even during complete internet dropouts.
-* **Cross-Platform Delivery:** Unified experience across web browsers and native Android APK with native back-button exit confirmation.
+| Version | Release Date | Summary of Changes |
+| :--- | :--- | :--- |
+| **v0.1** | October 2026 | Initial baseline: single-family home, master admin `2000`, member phone login, live GPS radar, gallery, room checklists, mobile back-button exit dialog. Archived in `docs/v0.1/SRS_v0.1.md`. |
+| **v0.2** | November 2026 | **Multi-Tenant Platform Transformation:**<br>• Super Admin tier: lists all homes, views member details per home, provisions homes, and sets home passwords.<br>• Super Admin master password set to `2000` (strictly hidden from all client UI text).<br>• Home Admin registration flow on login screen (`Home Name`, unique `Email`, `Password`, `Confirm Password`).<br>• Home Admin dedicated password-based login.<br>• Isolated multi-tenant database scoping (`home_id` foreign key on members & gallery).<br>• Universal modern UI styling across web and Android mobile APK without adding or removing features. Active in `docs/v0.2/SRS_v0.2.md`. |
 
 ---
 
-## 2. User Roles & Permission Matrix (RBAC)
+## 2. Executive Summary & Objectives
 
-| Feature / Action | Admin (`2000`) | Family Member (Registered Phone) |
-| :--- | :---: | :---: |
-| Built-in Default User | ✅ Yes (Mobile: `2000`) | ❌ No (Added by Admin) |
-| View Home Dashboard & Member Cards | ✅ Full Access | ✅ Full Access |
-| View All Members' GPS Location on Home Map | ✅ Full Access | ✅ Full Access |
-| Update Personal Live GPS Location | ✅ Yes | ✅ Yes (Own Location) |
-| View Personal Room Details | ✅ Any Member | 🔒 Own Room Only |
-| Edit Bio, Room Notes & Personal Checklist | ✅ Any Member | 🔒 Own Room Only |
-| Add New Family Members | ✅ Yes | ❌ No |
-| Delete Family Members | ✅ Yes | ❌ No |
-| Upload Photos to Family Gallery | ✅ Yes | ✅ Yes |
-| Delete Family Gallery Photos | ✅ Yes | ✅ Yes (Own uploads) |
-| In-App API / Database Settings | ✅ Yes | ✅ Yes |
+### 2.1 Purpose
+The **Family Home App** is a private, multi-tenant family collaboration platform designed to host multiple independent household sanctuaries. Each home enjoys an isolated, secure environment featuring real-time status updates, personal room management, interactive to-do checklists, live family GPS tracking, and private photo galleries.
+
+### 2.2 Core Design Principles
+* **Multi-Tenant Isolation:** Complete data separation between family homes (`home_id` scoping).
+* **Super Admin Governance:** Global visibility and home provisioning without exposing administrative credentials.
+* **Streamlined Home Onboarding:** Easy self-service home registration with unique email and password.
+* **Frictionless Family Member Access:** Members log in using their registered mobile numbers and are automatically routed to their family's home.
+* **Universal Production Aesthetics:** Clean, modern, universally appealing visual language across desktop browsers and native Android APK.
+* **Strict Feature Fidelity:** Existing functionality (GPS radar, cartoon home, gallery, checklists, offline fallback, exit modal) is preserved with zero feature bloat or deletion.
 
 ---
 
-## 3. Module-Wise Functional Requirements
+## 3. User Roles & Permission Matrix (RBAC)
 
-### Module 1: Authentication & Session Management
-* **REQ-1.1 (Master Admin Account):** The system provides one built-in master Admin user accessible by typing phone number `2000`.
-* **REQ-1.2 (Dynamic Family Member Login):** Family members log in using their registered mobile phone numbers (assigned by Admin during creation). No hardcoded default member accounts exist.
-* **REQ-1.3 (Persistent Login Session):** Authentication tokens/user records remain saved in local client storage across app closures. Reopening the app or returning to the browser bypasses the login screen directly into the Home Dashboard.
-* **REQ-1.4 (Explicit Logout):** Clears authentication credentials from local storage and routes the user back to the login interface.
+| Feature / Action | 👑 Super Admin | 🏡 Home Admin | 👤 Family Member |
+| :--- | :---: | :---: | :---: |
+| **Authentication Credential** | Master Password `2000` (Hidden) | Registered Email + Password (Both Mandatory) | Registered Mobile Number |
+| **List All Platform Homes** | ✅ Full Access | ❌ No | ❌ No |
+| **Provision New Home & Set Password** | ✅ Full Access | ❌ No | ❌ No |
+| **Enter Home Action** | 🛡️ Dedicated Home Audit View (Activity & Location logs only) | 🏡 Home Dashboard | 👤 Member View |
+| **Inspect User Personal Secrets / Details** | ❌ Restricted by Policy | 🔒 Own Home Only | 🔒 Own Profile Only |
+| **Delete Home Platform-Wide** | ✅ Full Access | ❌ No | ❌ No |
+| **Add / Edit / Delete Home Members** | ❌ (Platform only) | ✅ Own Home Only | ❌ No |
+| **View Home Dashboard & Cartoon Home** | 🔍 Via Audit Console | ✅ Full Access | ✅ Full Access |
+| **View Live Family GPS Radar** | 🔍 Usage Counts in Audit | ✅ Full Access (Home) | ✅ Full Access (Home) |
+| **Update Personal Live GPS Location** | ❌ No | ✅ Yes (Home) | ✅ Yes (Own Location) |
+| **View Room Details & Sanctuaries** | ❌ Restricted by Policy | ✅ Any Home Member | 🔒 Own Room Only |
+| **Edit Room Notes & Personal Checklist**| ❌ Restricted by Policy | ✅ Any Home Member | 🔒 Own Room Only |
+| **Family Gallery: View & Upload** | ❌ No | ✅ View & Upload All | ✅ View & Upload All |
+| **Family Gallery: Delete Photos** | ❌ No | ✅ Delete ANY Photo in Home | 🔒 Delete OWN Photos ONLY |
 
-### Module 2: Home Dashboard & House Layout
-* **REQ-2.1 (Active User Indicator & Header):** Clean header displaying the "Our Family Home" brand and active user identity pill (👑 Admin or 👤 Member Name + Phone) alongside the Logout action.
-* **REQ-2.2 (Interactive Cartoon Home):** Visual representation of the household with dynamic member statistics and animated interactivity.
-* **REQ-2.3 (Member Grid & Empty State):**
-  * Displays member cards with caricatures, role tags, and room status, with a unified "Tap to open profile" prompt for all user types.
-  * When no family members are yet registered, shows a clean empty state card inviting the Admin to add the first family member.
+---
 
-### Module 3: Personal Room & Profile Management (`MemberPage`)
-* **REQ-3.1 (Focused Two-Tab Layout):** Profile view is strictly focused on:
+## 4. Module-Wise Functional Requirements
+
+### Module 1: Multi-Tenant Authentication & Registration
+* **REQ-1.1 (Home Registration):**
+  * The login interface provides a clear **"Register New Home"** action.
+  * Form fields: `Home Name`, `Email` (Home Email, must be unique), `Password`, and `Confirm Password`.
+  * Submitting creates a new record in `homes` table and logs the user directly in as Home Admin.
+* **REQ-1.2 (Home Admin Dedicated Login):**
+  * Home Admins authenticate using their registered Email and Password.
+  * Dedicated, password-based authentication.
+* **REQ-1.3 (Super Admin Portal & Password):**
+  * Super Admin authenticates using master password `2000`.
+  * **Critical:** Password `2000` is strictly hidden and **NEVER displayed anywhere** in client UI text, placeholders, or hints.
+* **REQ-1.4 (Family Member Mobile Login):**
+  * Family members log in using their registered mobile number.
+  * System identifies the member and their linked `home_id`, automatically loading their specific family home.
+* **REQ-1.5 (Session Persistence & Logout):**
+  * Active sessions (`role`, `homeId`, `homeName`, `memberId`) persist in client storage across app restarts and browser reloads.
+  * Explicit logout clears credentials and returns to the login screen.
+
+### Module 2: Super Admin Platform Management
+* **REQ-2.1 (Homes Overview & Metrics):**
+  * Displays total homes registered, total family members, and overall system status.
+  * Lists all homes with Home Name, Email, Member Count, Photo Count, and Registration Date.
+* **REQ-2.2 (Inspect Home Members):**
+  * Super Admin can expand/inspect any home to view all member profiles inside that home (caricatures, names, phone numbers, roles, room status).
+* **REQ-2.3 (Provision New Home):**
+  * Super Admin can create a new home from the platform console (`Home Name`, `Email`, `Password`).
+* **REQ-2.4 (Manage / Reset Home Password):**
+  * Super Admin can set or reset the password for any home.
+* **REQ-2.5 (Delete Home):**
+  * Deletes a home with cascading deletion of all associated members and gallery photos.
+
+### Module 3: Home Dashboard & House Layout (Multi-Tenant Scoped)
+* **REQ-3.1 (Dynamic Home Header):**
+  * Displays the specific Home Name (e.g. *"The Miller Family Home"*) with user role indicator (`👑 Home Admin` or `👤 Member Name`).
+* **REQ-3.2 (Interactive Cartoon Home):**
+  * Centered visual cartoon home illustration with chimney smoke animations and dynamic member count.
+* **REQ-3.3 (Scoped Members Grid):**
+  * Displays member cards belonging strictly to the active home.
+  * Unified *"Tap to open profile"* prompt.
+  * Shows clean empty state when no members have been registered yet.
+
+### Module 4: Personal Room & Profile Management (`MemberPage`)
+* **REQ-4.1 (Focused Two-Tab Layout):**
   * Tab 1: **Personal Story & About** (Bio, role, quote, registered mobile number).
   * Tab 2: **My Room Sanctuary** (Room description, daily status, personal notepad, and to-do checklist).
-  * *(Location tab is removed from the profile view, as GPS tracking is centralized on the Home Page)*.
-* **REQ-3.2 (Single Arrow Navigation):** Back to Home button displays a clean single arrow icon (`Back to Home`).
-* **REQ-3.3 (Room Checklist / Tasks):** Interactive checklist allowing members to add tasks, toggle completion states, and delete items.
+* **REQ-4.2 (Single Arrow Navigation):**
+  * Back to Home button uses a clean single-arrow icon (`Back to Home`).
+* **REQ-4.3 (Interactive Checklist):**
+  * Members add tasks, toggle completion states, and delete items.
 
-### Module 4: Live Family Geolocation & Central Map (`MembersMap`)
-* **REQ-4.1 (Universal Location Visibility):** Every logged-in user (Admin and family members) has full access to view all members' reported locations directly on the Home Page Google Location Tile.
-* **REQ-4.2 (Interactive Google Maps Integration):** Embedded live Google Maps view with selectable quick-pins for each family member.
-* **REQ-4.3 (One-Click "Update My Location"):** Prominent button directly on the map tile that queries device GPS (`navigator.geolocation`) and immediately broadcasts the updated coordinates to the database.
+### Module 5: Live Family Geolocation & Central Map (`MembersMap`)
+* **REQ-5.1 (Home-Scoped Location Visibility):**
+  * All members and Admin of a home view their family's reported locations on the centralized Home Page Google Location Tile.
+  * Complete isolation: coordinates from other homes are never visible.
+* **REQ-5.2 (Interactive Google Maps Integration):**
+  * Embedded live Google Maps view with selectable caricature quick-pins.
+* **REQ-5.3 (One-Click "Update My Location"):**
+  * Queries device GPS (`navigator.geolocation`) and updates coordinates for the active user in the database.
 
-### Module 5: Real-Time Cross-Device Synchronization
-* **REQ-5.1 (Instant Data Sync):** Background synchronization loop running at 2.5-second intervals automatically polls the backend API and synchronizes `localStorage` storage events.
-* **REQ-5.2 (Immediate UI Reflection):** When any family member updates their name, mobile number, room status, notes, or checklist on any device, the change reflects simultaneously on all other users' screens without requiring a manual page refresh.
-* **REQ-5.3 (Active Session Re-alignment):** If an Admin or member changes an active user's details, the active session in that user's app updates dynamically.
+### Module 6: Real-Time Cross-Device Synchronization
+* **REQ-6.1 (Continuous Data Sync):**
+  * Background synchronization loop polls the backend API every 2.5 seconds.
+  * Updates to member profiles, statuses, checklists, or photos reflect simultaneously across all active devices in that home.
+* **REQ-6.2 (Active Session Re-alignment):**
+  * When an active user's details are edited, their active session refreshes automatically.
 
-### Module 6: Mobile App Lifecycle & Redirection
-* **REQ-6.1 (Hardware Back Button Handling):** In the Android APK (via `@capacitor/app`), pressing the physical/system back button on child screens (modals, profile view) navigates back to the Home Dashboard.
-* **REQ-6.2 (Exit Confirmation Popup):** Pressing the back button on the Home Dashboard triggers a confirmation dialog:
-  * *"Do you want to close the app? Your login session will be kept safe when you reopen."*
+### Module 7: Mobile App Lifecycle & Redirection
+* **REQ-7.1 (Hardware Back Button Navigation):**
+  * Pressing the system back button on child screens returns to the Home Dashboard.
+* **REQ-7.2 (Exit Confirmation Popup):**
+  * Pressing back on the root Home screen triggers confirmation dialog:
+    *"Do you want to close the app? Your login session will be kept safe when you reopen."*
   * Options: **[Cancel]** and **[Close App]**.
-* **REQ-6.3 (Clean Application Exit):** Clicking **[Close App]** invokes native exit (`CapApp.exitApp()`).
 
-### Module 7: Family Administration & Member CRUD
-* **REQ-7.1 (Add Member):** Admin registers new family members with Name, Mobile Number, Role, Room details, and Caricature avatar.
-* **REQ-7.2 (Edit Member):** Admin can modify any profile; members can modify their own details.
-* **REQ-7.3 (Zero-Member Tolerance):** The system permits deleting all members (down to 0 members), with Admin `2000` remaining as the administrative custodian.
-* **REQ-7.4 (Identity & Uniqueness Integrity):** The database enforces a `UNIQUE` constraint on `mobile_number`. Backend APIs strictly reject registrations attempting to use phone `2000` (reserved for Admin) or numbers already claimed by existing members.
+### Module 8: Family Administration & Member CRUD
+* **REQ-8.1 (Add Member):** Home Admin registers members with Name, Mobile Number, Role, Room details, and Caricature avatar.
+* **REQ-8.2 (Edit Member):** Home Admin can modify any profile; members can modify their own details.
+* **REQ-8.3 (Zero-Member Tolerance):** Homes can safely have 0 members while remaining fully operational for the Home Admin.
+* **REQ-8.4 (Identity Integrity):** Unique constraint on `mobile_number` across members.
 
-### Module 8: Family Photo Memory Gallery (`FamilyGallery`)
-* **REQ-8.1 (Photo Uploads):** Allows uploading family images with memory captions and dual attribution (`uploaded_by` display name and durable `uploaded_by_id`).
-* **REQ-8.2 (Lightbox View):** Responsive gallery grid with modal viewer for full-resolution inspection.
-* **REQ-8.3 (Ownership & Deletion Rules):** Admins can delete any photo; members can delete their own uploaded photos even if their display name is later edited.
-
----
-
-## 4. Technical Architecture
-
-```
-┌────────────────────────────────────────────────────────┐
-│                   CLIENT LAYER (FRONTEND)              │
-│  - Web: React 18 + TypeScript + Vite + Tailwind CSS    │
-│  - Mobile: Capacitor 8.6 Android (Java/Gradle APK)     │
-│  - App Lifecycle: @capacitor/app Back Button & Exit    │
-│  - Real-Time Engine: 2.5s Active Sync & Storage Events │
-└───────────────────────────┬────────────────────────────┘
-                            │ REST API (JSON / HTTP)
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│                   BACKEND API LAYER                    │
-│  - Runtime: Node.js (v20+ ES Modules)                  │
-│  - Server: Native HTTP + mysql2 Connection Pooling     │
-│  - Security: Path Traversal Protection & 15MB DoS Cap  │
-│  - Resiliency: Safe Mode In-Memory Fallback            │
-└───────────────────────────┬────────────────────────────┘
-                            │ TLS / SSL Port 3306 or 4000
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│                   DATABASE LAYER                       │
-│  - Engine: MySQL 8.0 / TiDB Cloud Serverless           │
-│  - Character Set: utf8mb4 (Full Emoji & Unicode)       │
-│  - Packet Size: 64MB max_allowed_packet                │
-│  - Tables: members (dynamic, unique phone), gallery    │
-└────────────────────────────────────────────────────────┘
-```
+### Module 9: Family Photo Memory Gallery (`FamilyGallery`)
+* **REQ-9.1 (Home-Scoped Photo Uploads):** Photos uploaded belong exclusively to the active home.
+* **REQ-9.2 (Dual Attribution & Lightbox):** Captions, uploader display name, durable `uploaded_by_id`, and full-screen lightbox modal.
+* **REQ-9.3 (Deletion Rules):** Home Admins can delete any photo in their home; members can delete their own uploaded photos.
 
 ---
 
-## 5. Non-Functional Requirements (NFR)
+## 5. Technical Architecture & Database Schema
 
-1. **Local-First Staging:** All modifications and feature iterations are tested and validated strictly on the local developer environment before any production/remote push.
-2. **Session Durability:** Closing or terminating the mobile app does not invalidate the user's login state.
-3. **Data Integrity:** Strict input sanitization, database unique constraints, and prevention of administrative credential collisions.
-4. **API & File Security:** Strict containment checks preventing static file traversal attacks outside web roots, and 15MB bounded request stream limits against DoS memory exhaustion.
+```mermaid
+erDiagram
+    HOMES {
+        string id PK "home_xxx"
+        string name "Home Name"
+        string email UK "Unique Home Email"
+        string password_hash "Encrypted Password"
+        string status "active / suspended"
+        string created_at
+        string updated_at
+    }
+
+    MEMBERS {
+        string id PK "mem_xxx"
+        string home_id FK "References HOMES(id) ON DELETE CASCADE"
+        string name "Member Name"
+        string mobile_number UK "Unique registered mobile"
+        string caricature_key "boy, girl, grandpa..."
+        string image_url
+        string role "Role in household"
+        string bio
+        json tags
+        string room_title
+        string room_desc
+        string room_status
+        string room_notes
+        json checklist
+        json location
+        string quote
+        string created_at
+        string updated_at
+    }
+
+    GALLERY {
+        string id PK "img_xxx"
+        string home_id FK "References HOMES(id) ON DELETE CASCADE"
+        string image_data "LONGTEXT base64"
+        string title
+        string uploaded_by
+        string uploaded_by_id
+        string created_at
+    }
+
+    HOMES ||--o{ MEMBERS : "contains (1-to-N)"
+    HOMES ||--o{ GALLERY : "owns (1-to-N)"
+```
+
+---
+
+## 6. Non-Functional Requirements (NFR)
+
+1. **Local-First Staging:** All modifications and feature iterations are tested strictly in the local environment before any remote push.
+2. **Credential Privacy:** Super Admin master password `2000` is strictly confidential and never displayed or referenced in UI copy.
+3. **Multi-Tenant Security:** Every API query on `members` and `gallery` must enforce strict `home_id` isolation.
+4. **Resilience & Safe Mode:** Full in-memory fallback maintains home registration, member management, and gallery when offline.
+5. **Universal Styling:** Visual polish utilizing responsive Tailwind CSS, subtle ambient lighting, rounded glassmorphism, and clear typography.

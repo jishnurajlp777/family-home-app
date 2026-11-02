@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FamilyMember, AuthUser } from '../types/member';
 import { Caricature } from './Caricature';
+import { FamilyService } from '../services/api';
 
 interface MembersMapProps {
   members: FamilyMember[];
@@ -42,6 +43,7 @@ export const MembersMap: React.FC<MembersMapProps> = ({
         if (syncToDatabase && onUpdateLocation) {
           try {
             await onUpdateLocation(latitude, longitude, 'Live Current Area');
+            FamilyService.recordLocationUsage(selectedPinMemberId || undefined);
             setSyncStatus('📍 Live location shared with family!');
             setTimeout(() => setSyncStatus(null), 4000);
           } catch {
@@ -73,6 +75,7 @@ export const MembersMap: React.FC<MembersMapProps> = ({
   const currentLng = selectedMember?.location?.lng || liveLocation?.lng || 77.5946;
 
   const handleOpenGoogleMaps = (lat: number, lng: number) => {
+    FamilyService.recordLocationUsage(selectedPinMemberId || undefined);
     window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank', 'noopener,noreferrer');
   };
 

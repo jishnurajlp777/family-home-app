@@ -1,7 +1,8 @@
 @echo off
-title Family Home Interface Server (SQLite DB)
+cd /d "%~dp0\.."
+title Family Home Interface Server (Node.js + MySQL / Cache)
 echo ========================================================
-echo   Starting Family Home Interface (SQLite Backend)
+echo   Starting Family Home Backend Server
 echo ========================================================
 echo.
 
@@ -13,11 +14,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b
 )
 
-echo Starting SQLite Backend on http://localhost:3000 ...
-start "" http://localhost:3000
-if exist server\server.js (
-    node server\server.js
-) else (
-    node server.js
-)
+echo Starting Backend on http://localhost:3000 ...
+start "" http://localhost:3000/api/health
+node server\server.js
 pause

@@ -1,9 +1,10 @@
-import React from 'react';
-import { FamilyMember, AuthUser } from '../types/member';
+import React, { useState } from 'react';
+import { FamilyMember, AuthUser, ActiveCall } from '../types/member';
 import { CartoonHome } from './CartoonHome';
 import { Caricature } from './Caricature';
 import { MembersMap } from './MembersMap';
 import { FamilyGallery } from './FamilyGallery';
+import { HomeSettingsModal } from './HomeSettingsModal';
 
 interface HomePageProps {
   members: FamilyMember[];
@@ -16,6 +17,8 @@ interface HomePageProps {
   onShowToast: (message: string, type?: 'success' | 'error') => void;
   onRefresh?: () => void;
   onUpdateLocation?: (lat: number, lng: number, placeName?: string) => Promise<void>;
+  onTriggerCall?: (targetId?: string) => void;
+  activeCall?: ActiveCall | null;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
@@ -27,10 +30,13 @@ export const HomePage: React.FC<HomePageProps> = ({
   onOpenEditMember,
   onLogout,
   onShowToast,
-  onRefresh: _onRefresh,
+  onRefresh,
   onUpdateLocation,
+  onTriggerCall,
+  activeCall,
 }) => {
   const isAdmin = currentUser.role === 'admin';
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   const handleMemberCardClick = (member: FamilyMember) => {
     if (isAdmin) {
@@ -42,7 +48,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     if (currentUser.memberId === member.id || currentUser.mobile_number === member.mobile_number) {
       onSelectMember(member.id);
     } else {
-      onShowToast(`Restricted: You can only view your own details. Log in as ${member.name} or Admin (2000).`, 'error');
+      onShowToast('Restricted: You can only view your own details. Contact your home.', 'error');
     }
   };
 
@@ -54,20 +60,34 @@ export const HomePage: React.FC<HomePageProps> = ({
           <span className="text-2xl">🏡</span>
           <div>
             <h1 className="text-sm sm:text-base font-extrabold text-slate-800 tracking-tight">
-              Our Family Home
+              {currentUser.homeName || 'Our Family Home'}
             </h1>
           </div>
         </div>
 
         {/* User Access Level Badge & Login Switcher */}
-        <div className="flex items-center gap-2.5 self-end sm:self-auto">
+        <div className="flex items-center gap-2.5 self-end sm:self-auto flex-wrap">
           {isAdmin ? (
-            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3.5 py-1.5 rounded-xl shadow-2xs">
-              <span className="text-sm">👑</span>
-              <div className="text-left">
-                <span className="text-xs font-bold text-amber-900 block leading-tight">Admin</span>
+            <>
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3.5 py-1.5 rounded-xl shadow-2xs">
+                <span className="text-sm">🏡</span>
+                <div className="text-left">
+                  <span className="text-xs font-bold text-amber-900 block leading-tight">Home</span>
+                  {currentUser.email && (
+                    <span className="text-[10px] text-amber-700 font-medium block leading-none mt-0.5">{currentUser.email}</span>
+                  )}
+                </div>
               </div>
-            </div>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 px-3.5 py-2 rounded-xl shadow-2xs transition active:scale-95 cursor-pointer"
+                title="Home Profile & Password Settings"
+              >
+                <span>⚙️</span>
+                <span>Settings</span>
+              </button>
+            </>
           ) : (
             <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl shadow-2xs">
               <span className="text-sm">👤</span>
@@ -76,6 +96,23 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <span className="text-[10px] text-indigo-700 font-medium">Mobile: {currentUser.mobile_number}</span>
               </div>
             </div>
+          )}
+
+          {/* Internet Calling Button */}
+          {onTriggerCall && (
+            <button
+              type="button"
+              onClick={() => onTriggerCall('all')}
+              className={`inline-flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl shadow-xs transition active:scale-95 cursor-pointer ${
+                activeCall && activeCall.status !== 'ended'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+              }`}
+              title="Start or join family internet call"
+            >
+              <span>📞</span>
+              <span>{activeCall && activeCall.status !== 'ended' ? 'Live Call (Join)' : 'Internet Call'}</span>
+            </button>
           )}
 
           <button
@@ -170,8 +207,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <h4 className="text-sm font-extrabold text-slate-800">No Family Members Registered Yet</h4>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto">
                   {isAdmin
-                    ? 'As Admin, click "+ Add Member" to register your family members with their phone numbers.'
-                    : 'Please contact the Admin (2000) to register your family member profile.'}
+                    ? 'Click "+ Add Member" to register your family members with their phone numbers.'
+                    : 'Please contact your home to register your family member profile.'}
                 </p>
                 {isAdmin && (
                   <button
@@ -231,6 +268,23 @@ export const HomePage: React.FC<HomePageProps> = ({
                       </button>
                     )}
 
+                    {/* Direct Call button on member card */}
+                    {onTriggerCall && !isOwnProfile && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTriggerCall(m.id);
+                        }}
+                        title={`Call ${m.name}`}
+                        className={`absolute top-2 w-6 h-6 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-800 border border-emerald-200 flex items-center justify-center text-xs opacity-75 group-hover:opacity-100 transition shadow-2xs active:scale-90 z-10 ${
+                          isAdmin ? 'right-9' : 'right-2'
+                        }`}
+                      >
+                        📞
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => handleMemberCardClick(m)}
@@ -286,6 +340,19 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Home Administrator Profile Settings Modal */}
+      {isAdmin && (
+        <HomeSettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          currentUser={currentUser}
+          onSettingsUpdated={(updatedName) => {
+            onShowToast(`Home settings updated successfully! Welcome to ${updatedName}.`);
+            if (onRefresh) onRefresh();
+          }}
+        />
+      )}
     </div>
   );
 };
