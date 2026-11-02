@@ -245,6 +245,67 @@ async function initMySQL() {
       await pool.query(`DELETE FROM members WHERE id IN ('mem_jishnu', 'mem_ashna', 'mem_raju', 'mem_lalitha')`);
     } catch {}
 
+    // Automatically synchronize local database cache with MySQL if MySQL was empty
+    try {
+      const [dbHomes] = await pool.query('SELECT * FROM homes');
+      if (dbHomes.length === 0 && memoryHomes.length > 0) {
+        console.log(`📦 Syncing ${memoryHomes.length} local homes to MySQL...`);
+        for (const h of memoryHomes) {
+          await pool.query(
+            `INSERT IGNORE INTO homes (id, name, email, password_hash, created_at, updated_at, last_active_at, location_usage_count)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [h.id, h.name, h.email, h.password_hash, h.created_at, h.updated_at, h.last_active_at || h.created_at, h.location_usage_count || 0]
+          );
+        }
+      } else if (dbHomes.length > 0) {
+        memoryHomes = dbHomes;
+      }
+    } catch (e) {
+      console.warn('Homes sync notice:', e.message);
+    }
+
+    try {
+      const [dbMembers] = await pool.query('SELECT * FROM members');
+      if (dbMembers.length === 0 && memoryMembers.length > 0) {
+        console.log(`📦 Syncing ${memoryMembers.length} local members to MySQL...`);
+        for (const m of memoryMembers) {
+          await pool.query(
+            `INSERT IGNORE INTO members (id, home_id, name, mobile_number, caricature_key, image_url, role, bio, tags, room_title, room_desc, room_status, room_notes, checklist, location, quote, created_at, updated_at, last_active_at, location_usage_count)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              m.id, m.home_id || 'default_home', m.name, String(m.mobile_number).trim(), m.caricature_key || 'boy',
+              m.image_url || null, m.role || 'Family Member', m.bio || '', JSON.stringify(m.tags || []),
+              m.room_title || '', m.room_desc || '', m.room_status || '', m.room_notes || '',
+              JSON.stringify(m.checklist || []), JSON.stringify(m.location || {}), m.quote || '',
+              m.created_at, m.updated_at, m.last_active_at || m.created_at, m.location_usage_count || 0
+            ]
+          );
+        }
+      } else if (dbMembers.length > 0) {
+        memoryMembers = dbMembers.map(formatRow);
+      }
+    } catch (e) {
+      console.warn('Members sync notice:', e.message);
+    }
+
+    try {
+      const [dbGallery] = await pool.query('SELECT * FROM gallery');
+      if (dbGallery.length === 0 && memoryGallery.length > 0) {
+        console.log(`📦 Syncing ${memoryGallery.length} local gallery items to MySQL...`);
+        for (const g of memoryGallery) {
+          await pool.query(
+            `INSERT IGNORE INTO gallery (id, home_id, image_data, title, uploaded_by, uploaded_by_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [g.id, g.home_id || 'default_home', g.image_data, g.title || 'Family Memory', g.uploaded_by || 'Family Member', g.uploaded_by_id || null, g.created_at]
+          );
+        }
+      } else if (dbGallery.length > 0) {
+        memoryGallery = dbGallery;
+      }
+    } catch (e) {
+      console.warn('Gallery sync notice:', e.message);
+    }
+
     isDbConnected = true;
     console.log(`✅ MySQL Connected: ${DB_NAME} @ ${DB_HOST}:${DB_PORT}`);
   } catch (err) {
