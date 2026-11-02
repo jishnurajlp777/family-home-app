@@ -80,6 +80,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
               <button
                 type="button"
+                data-testid="home-btn-settings"
                 onClick={() => setIsSettingsOpen(true)}
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 px-3.5 py-2 rounded-xl shadow-2xs transition active:scale-95 cursor-pointer"
                 title="Home Profile & Password Settings"
@@ -102,6 +103,7 @@ export const HomePage: React.FC<HomePageProps> = ({
           {onTriggerCall && (
             <button
               type="button"
+              data-testid="home-btn-trigger-call"
               onClick={() => onTriggerCall('all')}
               className={`inline-flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl shadow-xs transition active:scale-95 cursor-pointer ${
                 activeCall && activeCall.status !== 'ended'
@@ -117,8 +119,9 @@ export const HomePage: React.FC<HomePageProps> = ({
 
           <button
             type="button"
+            data-testid="home-btn-logout"
             onClick={onLogout}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 px-3.5 py-2 rounded-xl shadow-2xs transition active:scale-95"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 px-3.5 py-2 rounded-xl shadow-2xs transition active:scale-95 cursor-pointer"
             title="Log out of application"
           >
             <span>🚪</span>
@@ -184,6 +187,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    data-testid="home-btn-add-member"
                     onClick={onOpenAddMember}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3.5 py-2 rounded-xl shadow-xs transition-all active:scale-95"
                   >

@@ -155,6 +155,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               </label>
               <input
                 type="text"
+                data-testid="add-member-input-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Maya"
@@ -168,6 +169,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               </label>
               <input
                 type="text"
+                data-testid="add-member-input-role"
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
                 placeholder="e.g. Science Explorer"
@@ -183,6 +185,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
             </label>
             <input
               type="tel"
+              data-testid="add-member-input-mobile"
               value={mobileNumber}
               onChange={(e) => setMobileNumber(e.target.value)}
               placeholder="e.g. 9876543214 (Used by this member to log in)"

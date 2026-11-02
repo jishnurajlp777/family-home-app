@@ -176,6 +176,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         <div className="flex items-center gap-2.5 self-end sm:self-auto">
           <button
             type="button"
+            data-testid="sa-btn-create-home"
             onClick={handleOpenCreateModal}
             className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2.5 rounded-xl shadow-xs transition active:scale-95 cursor-pointer"
           >
@@ -185,6 +186,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
           <button
             type="button"
+            data-testid="sa-btn-logout"
             onClick={onLogout}
             className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 px-3.5 py-2.5 rounded-xl shadow-2xs transition active:scale-95 cursor-pointer"
           >
@@ -378,11 +380,17 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               Create an isolated household account and set its initial administrator password.
             </p>
 
-            <form onSubmit={handleCreateHome} className="space-y-3.5">
+            <form onSubmit={handleCreateHome} className="space-y-3.5" data-testid="sa-form-create-home">
+              {/* Decoy fields to intercept aggressive browser credential managers */}
+              <input type="text" name="decoy_sa_user" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
+              <input type="password" name="decoy_sa_pass" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
+
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Home Name</label>
                 <input
                   type="text"
+                  name="sa_new_home_name_input"
+                  data-testid="sa-input-home-name"
                   required
                   value={newHomeName}
                   onChange={(e) => setNewHomeName(e.target.value)}
@@ -396,11 +404,13 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Home Email</label>
                 <input
                   type="email"
+                  name="sa_new_home_email_input"
+                  data-testid="sa-input-home-email"
                   required
                   value={newHomeEmail}
                   onChange={(e) => setNewHomeEmail(e.target.value)}
                   placeholder="e.g. anderson@family.com"
-                  autoComplete="off"
+                  autoComplete="new-password"
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-600"
                 />
               </div>
@@ -409,6 +419,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Initial Password</label>
                 <input
                   type="password"
+                  name="sa_new_home_pass_input"
+                  data-testid="sa-input-home-password"
                   required
                   value={newHomePassword}
                   onChange={(e) => setNewHomePassword(e.target.value)}
@@ -421,6 +433,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               <div className="flex items-center gap-3 pt-3">
                 <button
                   type="button"
+                  data-testid="sa-btn-cancel-create"
                   onClick={() => setIsCreateModalOpen(false)}
                   className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
                 >
@@ -428,6 +441,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
+                  data-testid="sa-btn-submit-create"
                   disabled={isSubmittingCreate}
                   className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition disabled:opacity-50"
                 >

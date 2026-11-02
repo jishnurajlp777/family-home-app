@@ -37,6 +37,19 @@ export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
 
   useEffect(() => {
     loadGallery();
+    // Real-time synchronization loop across devices and platforms
+    const syncInterval = setInterval(() => {
+      FamilyService.getGallery().then((data) => {
+        setItems((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(data)) {
+            return data;
+          }
+          return prev;
+        });
+      }).catch(() => {});
+    }, 3500);
+
+    return () => clearInterval(syncInterval);
   }, [loadGallery]);
 
   // Compress high-resolution photos client-side to guarantee fast, reliable uploads
@@ -184,13 +197,14 @@ export const FamilyGallery: React.FC<FamilyGalleryProps> = ({
 
         {/* Upload Button */}
         <div>
-          <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-xl shadow-xs transition active:scale-95">
+          <label data-testid="gallery-btn-add-photo" className="cursor-pointer inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-xl shadow-xs transition active:scale-95">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
             </svg>
             <span>Add Photo</span>
             <input
               type="file"
+              data-testid="gallery-input-file"
               accept="image/*"
               onChange={handleFileChange}
               className="hidden"

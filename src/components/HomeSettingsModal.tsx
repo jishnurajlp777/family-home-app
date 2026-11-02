@@ -99,7 +99,11 @@ export const HomeSettingsModal: React.FC<HomeSettingsModalProps> = ({
         )}
 
         {/* Settings Form */}
-        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+        <form onSubmit={handleSubmit} className="mt-5 space-y-4" data-testid="settings-form">
+          {/* Decoy fields to intercept aggressive browser credential autofill */}
+          <input type="text" name="decoy_settings_user" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
+          <input type="password" name="decoy_settings_pass" style={{ display: 'none' }} tabIndex={-1} autoComplete="off" />
+
           {/* Home Name */}
           <div>
             <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 ml-1">
@@ -111,6 +115,8 @@ export const HomeSettingsModal: React.FC<HomeSettingsModalProps> = ({
               </span>
               <input
                 type="text"
+                name="settings_homename_input"
+                data-testid="settings-input-homename"
                 value={homeName}
                 onChange={(e) => {
                   setHomeName(e.target.value);

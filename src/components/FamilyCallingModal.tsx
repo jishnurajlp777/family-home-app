@@ -408,7 +408,7 @@ export const FamilyCallingModal: React.FC<FamilyCallingModalProps> = ({
   const isIncomingView = !isJoined && !isCaller && callSession.status === 'ringing';
 
   return (
-    <div className="fixed inset-0 z-90 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+    <div className="fixed inset-0 z-90 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn" data-testid="call-modal">
       <div className="bg-slate-900 border border-slate-800 text-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative overflow-hidden flex flex-col items-center">
         {/* Background glowing rings */}
         <div className="absolute -top-24 -left-24 w-64 h-64 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
@@ -442,6 +442,7 @@ export const FamilyCallingModal: React.FC<FamilyCallingModalProps> = ({
             <div className="flex items-center gap-6 pt-4">
               <button
                 type="button"
+                data-testid="call-btn-decline"
                 onClick={handleLeaveCall}
                 className="flex flex-col items-center gap-2 group cursor-pointer"
               >
@@ -453,6 +454,7 @@ export const FamilyCallingModal: React.FC<FamilyCallingModalProps> = ({
 
               <button
                 type="button"
+                data-testid="call-btn-accept"
                 onClick={handleJoinCall}
                 className="flex flex-col items-center gap-2 group cursor-pointer"
               >
@@ -538,6 +540,7 @@ export const FamilyCallingModal: React.FC<FamilyCallingModalProps> = ({
                   </span>
                   <button
                     type="button"
+                    data-testid="call-btn-repeat"
                     onClick={handleRepeatCall}
                     disabled={isRepeatingCall}
                     className="inline-flex items-center gap-1.5 text-xs font-extrabold text-amber-300 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 px-3 py-1.5 rounded-xl transition cursor-pointer active:scale-95 disabled:opacity-50"
@@ -567,6 +570,7 @@ export const FamilyCallingModal: React.FC<FamilyCallingModalProps> = ({
               {/* Mic Mute / Unmute */}
               <button
                 type="button"
+                data-testid="call-btn-mute"
                 onClick={handleToggleMute}
                 className={`flex flex-col items-center gap-1.5 px-4 py-2.5 rounded-2xl border transition active:scale-95 cursor-pointer ${
                   isMuted
@@ -581,6 +585,7 @@ export const FamilyCallingModal: React.FC<FamilyCallingModalProps> = ({
               {/* Repeat Call Button in Bar */}
               <button
                 type="button"
+                data-testid="call-btn-repeat-bar"
                 onClick={handleRepeatCall}
                 disabled={isRepeatingCall}
                 title="Ring again for members who have not joined yet"
@@ -593,6 +598,7 @@ export const FamilyCallingModal: React.FC<FamilyCallingModalProps> = ({
               {/* End / Leave Call */}
               <button
                 type="button"
+                data-testid="call-btn-end"
                 onClick={isCaller ? handleEndCall : handleLeaveCall}
                 className="flex flex-col items-center gap-1.5 px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 border border-rose-500 text-white transition active:scale-95 cursor-pointer shadow-lg"
               >

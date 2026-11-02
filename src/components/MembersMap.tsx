@@ -101,9 +101,10 @@ export const MembersMap: React.FC<MembersMapProps> = ({
           {onUpdateLocation && (
             <button
               type="button"
+              data-testid="map-btn-update-location"
               onClick={() => detectLiveLocation(true)}
               disabled={isDetecting}
-              className="text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition shadow-2xs flex items-center gap-1 active:scale-95 disabled:opacity-50"
+              className="text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition shadow-2xs flex items-center gap-1 active:scale-95 disabled:opacity-50 cursor-pointer"
               title="Detect and broadcast your current live GPS position"
             >
               <span>{isDetecting ? '📡' : '📍'}</span>
@@ -115,8 +116,9 @@ export const MembersMap: React.FC<MembersMapProps> = ({
           <div className="inline-flex rounded-xl bg-slate-100 p-0.5 border border-slate-200 text-[11px] font-bold">
             <button
               type="button"
+              data-testid="map-tab-google"
               onClick={() => setActiveView('google')}
-              className={`px-2.5 py-1 rounded-lg transition ${
+              className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                 activeView === 'google'
                   ? 'bg-white text-indigo-700 shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -126,8 +128,9 @@ export const MembersMap: React.FC<MembersMapProps> = ({
             </button>
             <button
               type="button"
+              data-testid="map-tab-radar"
               onClick={() => setActiveView('radar')}
-              className={`px-2.5 py-1 rounded-lg transition ${
+              className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                 activeView === 'radar'
                   ? 'bg-white text-indigo-700 shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -139,8 +142,9 @@ export const MembersMap: React.FC<MembersMapProps> = ({
 
           <button
             type="button"
+            data-testid="map-btn-open-google"
             onClick={() => handleOpenGoogleMaps(currentLat, currentLng)}
-            className="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl transition shadow-2xs flex items-center gap-1 active:scale-95"
+            className="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-xl transition shadow-2xs flex items-center gap-1 active:scale-95 cursor-pointer"
             title="Open coordinates in Google Maps"
           >
             <span>Open Maps</span>

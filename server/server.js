@@ -1213,10 +1213,16 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/members/') && req.method === 'PUT') {
     try {
       const auth = getAuthFromReq(req);
+      if (!auth) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized: Authentication required.' }));
+        return;
+      }
+
       const id = pathname.replace('/api/members/', '');
 
       // Authorization Check
-      if (auth && auth.role === 'member' && auth.memberId !== id) {
+      if (auth.role === 'member' && auth.memberId !== id) {
         res.writeHead(403, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Forbidden: You can only edit your own details.' }));
         return;
@@ -1334,13 +1340,40 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/members/') && req.method === 'DELETE') {
     try {
       const auth = getAuthFromReq(req);
-      if (auth && auth.role === 'member') {
+      if (!auth) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized: Authentication required.' }));
+        return;
+      }
+      if (auth.role === 'member') {
         res.writeHead(403, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Forbidden: Only Home can delete members.' }));
         return;
       }
 
       const id = pathname.replace('/api/members/', '');
+
+      // Scoping Check: Verify target member belongs to active home
+      let targetMember = null;
+      if (isDbConnected && pool) {
+        const [rows] = await pool.query('SELECT * FROM members WHERE id = ?', [id]);
+        if (rows.length > 0) targetMember = rows[0];
+      } else {
+        targetMember = memoryMembers.find((m) => m.id === id);
+      }
+
+      if (!targetMember) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Member not found.' }));
+        return;
+      }
+
+      if (auth.role !== 'super_admin' && targetMember.home_id !== auth.homeId) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden: Member belongs to another home.' }));
+        return;
+      }
+
       if (isDbConnected && pool) {
         await pool.query('DELETE FROM members WHERE id = ?', [id]);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1508,6 +1541,12 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/gallery/') && req.method === 'DELETE') {
     try {
       const auth = getAuthFromReq(req);
+      if (!auth) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized: Authentication required.' }));
+        return;
+      }
+
       const id = pathname.replace('/api/gallery/', '');
 
       let existing = null;
@@ -1524,10 +1563,17 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      // Home Scoping Check
+      if (auth.role !== 'super_admin' && existing.home_id && existing.home_id !== auth.homeId) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden: Photo belongs to another home.' }));
+        return;
+      }
+
       // Authorization Check:
       // Home Admin (admin) or Super Admin can delete ALL photos
       // Member can ONLY delete their own photo
-      if (auth && auth.role === 'member') {
+      if (auth.role === 'member') {
         const isOwner =
           (existing.uploaded_by_id && auth.memberId && String(existing.uploaded_by_id).trim() === String(auth.memberId).trim()) ||
           (existing.uploaded_by && auth.name && existing.uploaded_by.trim().toLowerCase() === auth.name.trim().toLowerCase());
@@ -1797,7 +1843,7 @@ const server = http.createServer(async (req, res) => {
       const callId = parts[3];
       const auth = getAuthFromReq(req);
       const myId = auth?.memberId || (auth?.role === 'admin' ? 'admin' : 'member');
-      const since = Number(parsedUrl.query?.since || 0);
+      const since = Number(parsedUrl.searchParams.get('since') || 0);
 
       const list = callSignals.get(callId) || [];
       const relevant = list.filter(

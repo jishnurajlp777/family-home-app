@@ -40,6 +40,14 @@ export class FamilyService {
       return envUrl.trim().replace(/\/$/, '');
     }
 
+    if (typeof window !== 'undefined' && window.location && window.location.origin) {
+      const origin = window.location.origin;
+      const host = window.location.hostname;
+      if (host && host !== 'localhost' && host !== '127.0.0.1' && !host.includes('github.io')) {
+        return origin.replace(/\/$/, '');
+      }
+    }
+
     return '';
   }
 
@@ -602,7 +610,13 @@ export class FamilyService {
 
         // Mirror in offline cache for subsequent offline sessions
         const offlineHomes = this.getRegisteredHomesOffline();
-        if (!offlineHomes.some((h) => h.id === data.homeId)) {
+        const existingIdx = offlineHomes.findIndex((h) => h.id === data.homeId || (h.email && h.email.toLowerCase() === cleanEmail));
+        if (existingIdx !== -1) {
+          offlineHomes[existingIdx].password = cleanPass;
+          offlineHomes[existingIdx].name = data.homeName || data.name || offlineHomes[existingIdx].name;
+          offlineHomes[existingIdx].email = data.email || cleanEmail;
+          this.saveRegisteredHomesOffline(offlineHomes);
+        } else {
           offlineHomes.push({
             id: data.homeId,
             name: data.homeName || data.name || 'Home',
@@ -628,9 +642,10 @@ export class FamilyService {
 
     // 2. Offline / LocalStorage Cache Fallback
     const offlineHomes = this.getRegisteredHomesOffline();
-    const matched = offlineHomes.find(
+    const matches = offlineHomes.filter(
       (h) => h.email && h.email.toLowerCase() === cleanEmail
     );
+    const matched = matches.length > 0 ? matches[matches.length - 1] : null;
 
     if (matched) {
       if (matched.password !== cleanPass) {
@@ -973,37 +988,121 @@ export class FamilyService {
   }
 
   public static async createHome(name: string, email: string, password: string): Promise<Home> {
-    const res = await fetch(`${this.getApiBase()}/api/super-admin/homes`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ name, email, password }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to create home.');
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = password.trim();
+
+    if (!cleanName || !cleanEmail || !cleanPass) {
+      throw new Error('Name, Email, and Password are required.');
     }
-    return await res.json();
+
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/super-admin/homes`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ name: cleanName, email: cleanEmail, password: cleanPass }),
+      });
+      if (res.ok) {
+        this.isServerMode = true;
+        const created = await res.json();
+        // Mirror in offline cache so Super Admin and Home Login can use it offline immediately
+        const offlineHomes = this.getRegisteredHomesOffline();
+        const existingIdx = offlineHomes.findIndex((h) => h.id === created.id || (h.email && h.email.toLowerCase() === cleanEmail));
+        if (existingIdx !== -1) {
+          offlineHomes[existingIdx] = {
+            ...offlineHomes[existingIdx],
+            name: cleanName,
+            email: cleanEmail,
+            password: cleanPass,
+          };
+        } else {
+          offlineHomes.push({
+            id: created.id,
+            name: cleanName,
+            email: cleanEmail,
+            password: cleanPass,
+            created_at: created.created_at || new Date().toISOString(),
+          });
+        }
+        this.saveRegisteredHomesOffline(offlineHomes);
+        return created;
+      } else {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to create home.');
+      }
+    } catch (e: any) {
+      if (e.message && (e.message.includes('already registered') || e.message.includes('required') || e.message.includes('Forbidden'))) {
+        throw e;
+      }
+      this.isServerMode = false;
+    }
+
+    // Offline / GitHub Pages Fallback
+    const offlineHomes = this.getRegisteredHomesOffline();
+    if (offlineHomes.some((h) => h.email && h.email.toLowerCase() === cleanEmail)) {
+      throw new Error(`Home email "${cleanEmail}" is already registered. Email must be unique.`);
+    }
+
+    const newHomeId = 'home_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+    const now = new Date().toISOString();
+    const newHomeRecord = {
+      id: newHomeId,
+      name: cleanName,
+      email: cleanEmail,
+      password: cleanPass,
+      created_at: now,
+    };
+    offlineHomes.push(newHomeRecord);
+    this.saveRegisteredHomesOffline(offlineHomes);
+
+    return {
+      id: newHomeId,
+      name: cleanName,
+      email: cleanEmail,
+      created_at: now,
+      member_count: 0,
+      photo_count: 0,
+      location_usage_count: 0,
+      last_active_at: now,
+    };
   }
 
   public static async setHomePassword(homeId: string, password: string): Promise<boolean> {
-    const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}/password`, {
-      method: 'PUT',
-      headers: this.getHeaders(homeId),
-      body: JSON.stringify({ password }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to update password.');
+    const cleanPass = String(password || '').trim();
+    if (!cleanPass || cleanPass.length < 3) {
+      throw new Error('Password must be at least 3 characters.');
     }
-    // Also update offline cache so that subsequent login checks have latest password
+
+    // Always update local cache mirror
     try {
       const offlineHomes = this.getRegisteredHomesOffline();
       const idx = offlineHomes.findIndex((h) => h.id === homeId);
       if (idx !== -1) {
-        offlineHomes[idx].password = password;
+        offlineHomes[idx].password = cleanPass;
         this.saveRegisteredHomesOffline(offlineHomes);
       }
     } catch {}
+
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}/password`, {
+        method: 'PUT',
+        headers: this.getHeaders(homeId),
+        body: JSON.stringify({ password: cleanPass }),
+      });
+      if (res.ok) {
+        this.isServerMode = true;
+        return true;
+      } else {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to update password.');
+      }
+    } catch (e: any) {
+      if (e.message && (e.message.includes('characters') || e.message.includes('Forbidden'))) {
+        throw e;
+      }
+      this.isServerMode = false;
+    }
+
     return true;
   }
 
@@ -1111,14 +1210,32 @@ export class FamilyService {
   }
 
   public static async deleteHome(homeId: string): Promise<boolean> {
-    const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}`, {
-      method: 'DELETE',
-      headers: this.getHeaders(homeId),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to delete home.');
+    // Delete from local cache & storage partitions
+    try {
+      const offlineHomes = this.getRegisteredHomesOffline();
+      const filtered = offlineHomes.filter((h) => h.id !== homeId);
+      this.saveRegisteredHomesOffline(filtered);
+      localStorage.removeItem(this.getMemberStorageKey(homeId));
+      localStorage.removeItem(this.getGalleryStorageKey(homeId));
+    } catch {}
+
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}`, {
+        method: 'DELETE',
+        headers: this.getHeaders(homeId),
+      });
+      if (res.ok) {
+        this.isServerMode = true;
+        return true;
+      } else {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to delete home.');
+      }
+    } catch (e: any) {
+      if (e.message && e.message.includes('Forbidden')) throw e;
+      this.isServerMode = false;
     }
+
     return true;
   }
 }
