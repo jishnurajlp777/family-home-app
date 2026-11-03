@@ -61,20 +61,55 @@ export class FamilyService {
     } catch {}
   }
 
-  public static async checkConnection(): Promise<{ connected: boolean; dbType: string }> {
+  public static hasLiveServerEndpoint(): boolean {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch(`${this.getApiBase()}/api/health`, { signal: controller.signal });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        this.isServerMode = true;
-        return { connected: true, dbType: data.database || 'MySQL' };
-      }
+      const override = localStorage.getItem(STORAGE_KEY_API_URL);
+      if (override && override.trim()) return true;
     } catch {}
-    this.isServerMode = false;
-    return { connected: false, dbType: 'Local Cache' };
+
+    const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+    if (envUrl && typeof envUrl === 'string' && envUrl.trim()) return true;
+
+    if (typeof window !== 'undefined' && window.location) {
+      const host = window.location.hostname;
+      // GitHub Pages has no backend server
+      if (host && host.includes('github.io')) {
+        return false;
+      }
+      // Capacitor mobile WebView has no local backend server
+      if (window.location.protocol === 'capacitor:' || (window as any).Capacitor?.isNativePlatform?.()) {
+        return false;
+      }
+      // Localhost / 127.0.0.1 in development with active server / proxy
+      if (host === 'localhost' || host === '127.0.0.1') {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  public static checkConnection(): Promise<{ connected: boolean; dbType: string }> {
+    if (!this.hasLiveServerEndpoint()) {
+      this.isServerMode = false;
+      return Promise.resolve({ connected: false, dbType: 'Local Web DB' });
+    }
+
+    return (async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${this.getApiBase()}/api/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          this.isServerMode = true;
+          return { connected: true, dbType: data.database || 'MySQL' };
+        }
+      } catch {}
+      this.isServerMode = false;
+      return { connected: false, dbType: 'Local Web DB' };
+    })();
   }
 
   public static isConnectedToServer(): boolean {
@@ -139,19 +174,21 @@ export class FamilyService {
     const queryParam = targetHomeId ? `?home_id=${encodeURIComponent(targetHomeId)}` : '';
     const headers = this.getHeaders(targetHomeId || undefined);
 
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/members${queryParam}`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        this.isServerMode = true;
-        const cleanData = this.deduplicateMembers(Array.isArray(data) ? data : []);
-        try {
-          localStorage.setItem(this.getMemberStorageKey(targetHomeId), JSON.stringify(cleanData));
-        } catch {}
-        return cleanData;
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/members${queryParam}`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          this.isServerMode = true;
+          const cleanData = this.deduplicateMembers(Array.isArray(data) ? data : []);
+          try {
+            localStorage.setItem(this.getMemberStorageKey(targetHomeId), JSON.stringify(cleanData));
+          } catch {}
+          return cleanData;
+        }
+      } catch {
+        this.isServerMode = false;
       }
-    } catch {
-      this.isServerMode = false;
     }
 
     // Local Storage Partition Fallback
@@ -346,21 +383,23 @@ export class FamilyService {
     const targetHomeId = explicitHomeId || this.getActiveHomeId();
     const queryParam = targetHomeId ? `?home_id=${encodeURIComponent(targetHomeId)}` : '';
 
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/gallery${queryParam}`, {
-        headers: this.getHeaders(targetHomeId || undefined),
-      });
-      if (res.ok) {
-        this.isServerMode = true;
-        const data = await res.json();
-        const cleanList = Array.isArray(data) ? data : [];
-        try {
-          localStorage.setItem(this.getGalleryStorageKey(targetHomeId), JSON.stringify(cleanList));
-        } catch {}
-        return cleanList;
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/gallery${queryParam}`, {
+          headers: this.getHeaders(targetHomeId || undefined),
+        });
+        if (res.ok) {
+          this.isServerMode = true;
+          const data = await res.json();
+          const cleanList = Array.isArray(data) ? data : [];
+          try {
+            localStorage.setItem(this.getGalleryStorageKey(targetHomeId), JSON.stringify(cleanList));
+          } catch {}
+          return cleanList;
+        }
+      } catch {
+        this.isServerMode = false;
       }
-    } catch {
-      this.isServerMode = false;
     }
 
     try {
@@ -389,24 +428,26 @@ export class FamilyService {
       created_at: new Date().toISOString(),
     };
 
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/gallery`, {
-        method: 'POST',
-        headers: this.getHeaders(home_id),
-        body: JSON.stringify({
-          image_data: imageData,
-          title,
-          uploaded_by: uploadedBy,
-          uploaded_by_id: uploadedById,
-          home_id,
-        }),
-      });
-      if (res.ok) {
-        this.isServerMode = true;
-        return await res.json();
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/gallery`, {
+          method: 'POST',
+          headers: this.getHeaders(home_id),
+          body: JSON.stringify({
+            image_data: imageData,
+            title,
+            uploaded_by: uploadedBy,
+            uploaded_by_id: uploadedById,
+            home_id,
+          }),
+        });
+        if (res.ok) {
+          this.isServerMode = true;
+          return await res.json();
+        }
+      } catch {
+        this.isServerMode = false;
       }
-    } catch {
-      this.isServerMode = false;
     }
 
     const items = await this.getGallery(home_id);
@@ -419,23 +460,25 @@ export class FamilyService {
 
   public static async deleteGalleryItem(id: string): Promise<boolean> {
     const home_id = this.getActiveHomeId();
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/gallery/${id}`, {
-        method: 'DELETE',
-        headers: this.getHeaders(home_id || undefined),
-      });
-      if (res.ok) {
-        this.isServerMode = true;
-        return true;
-      } else {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to delete photo.');
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/gallery/${id}`, {
+          method: 'DELETE',
+          headers: this.getHeaders(home_id || undefined),
+        });
+        if (res.ok) {
+          this.isServerMode = true;
+          return true;
+        } else {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to delete photo.');
+        }
+      } catch (err) {
+        if (err instanceof Error && !err.message.includes('Failed to fetch')) {
+          throw err;
+        }
+        this.isServerMode = false;
       }
-    } catch (err) {
-      if (err instanceof Error && !err.message.includes('Failed to fetch')) {
-        throw err;
-      }
-      this.isServerMode = false;
     }
 
     const items = await this.getGallery(home_id || undefined);
@@ -488,52 +531,54 @@ export class FamilyService {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = password.trim();
 
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/auth/register-home`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ home_name: cleanName, email: cleanEmail, password: cleanPass }),
-      });
-
-      if (res.ok) {
-        this.isServerMode = true;
-        const data = await res.json();
-        const user: AuthUser = {
-          token: data.token,
-          role: 'admin',
-          name: data.name || cleanName,
-          email: data.email || cleanEmail,
-          homeId: data.homeId,
-          homeName: data.homeName || cleanName,
-          home: data.home,
-        };
-        this.setCurrentUser(user);
-
-        // Mirror in offline cache for seamless subsequent offline usage
-        const offlineHomes = this.getRegisteredHomesOffline();
-        if (!offlineHomes.some((h) => h.email.toLowerCase() === cleanEmail)) {
-          offlineHomes.push({ id: data.homeId, name: cleanName, email: cleanEmail, password: cleanPass, created_at: new Date().toISOString() });
-          this.saveRegisteredHomesOffline(offlineHomes);
-        }
-
-        return user;
-      } else {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to register home.');
-      }
-    } catch (e: any) {
-      if (e.message && (e.message.includes('already registered') || e.message.includes('required') || e.message.includes('characters'))) {
-        throw e;
-      }
-      this.isServerMode = false;
-    }
-
-    // Offline registration fallback
+    // Check duplicate in offline cache first
     const offlineHomes = this.getRegisteredHomesOffline();
-    if (offlineHomes.some((h) => h.email.toLowerCase() === cleanEmail)) {
+    if (offlineHomes.some((h) => h.email && h.email.toLowerCase() === cleanEmail)) {
       throw new Error(`Home email "${cleanEmail}" is already registered. Please log in or use another email.`);
     }
 
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/auth/register-home`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ home_name: cleanName, email: cleanEmail, password: cleanPass }),
+        });
+
+        if (res.ok) {
+          this.isServerMode = true;
+          const data = await res.json();
+          const user: AuthUser = {
+            token: data.token,
+            role: 'admin',
+            name: data.name || cleanName,
+            email: data.email || cleanEmail,
+            homeId: data.homeId,
+            homeName: data.homeName || cleanName,
+            home: data.home,
+          };
+          this.setCurrentUser(user);
+
+          // Mirror in offline cache for seamless subsequent offline usage
+          if (!offlineHomes.some((h) => h.email.toLowerCase() === cleanEmail)) {
+            offlineHomes.push({ id: data.homeId, name: cleanName, email: cleanEmail, password: cleanPass, created_at: new Date().toISOString() });
+            this.saveRegisteredHomesOffline(offlineHomes);
+          }
+
+          return user;
+        } else if (res.status === 409) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Home email "${cleanEmail}" is already registered.`);
+        }
+      } catch (e: any) {
+        if (e.message && (e.message.includes('already registered') || e.message.includes('required') || e.message.includes('characters'))) {
+          throw e;
+        }
+        this.isServerMode = false;
+      }
+    }
+
+    // Offline registration fallback
     const newHomeId = 'home_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
     const now = new Date().toISOString();
     const newHomeRecord = { id: newHomeId, name: cleanName, email: cleanEmail, password: cleanPass, created_at: now };
@@ -586,58 +631,60 @@ export class FamilyService {
       throw new Error('Please enter your home password.');
     }
 
-    // 1. Server API Call
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password: cleanPass }),
-      });
+    // 1. Server API Call (if live server endpoint is configured)
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, password: cleanPass }),
+        });
 
-      if (res.ok) {
-        this.isServerMode = true;
-        const data = await res.json();
-        const user: AuthUser = {
-          token: data.token,
-          role: 'admin',
-          name: data.name || 'Home',
-          email: data.email || cleanEmail,
-          homeId: data.homeId,
-          homeName: data.homeName || data.name || 'Home',
-          home: data.home,
-        };
-        this.setCurrentUser(user);
-
-        // Mirror in offline cache for subsequent offline sessions
-        const offlineHomes = this.getRegisteredHomesOffline();
-        const existingIdx = offlineHomes.findIndex((h) => h.id === data.homeId || (h.email && h.email.toLowerCase() === cleanEmail));
-        if (existingIdx !== -1) {
-          offlineHomes[existingIdx].password = cleanPass;
-          offlineHomes[existingIdx].name = data.homeName || data.name || offlineHomes[existingIdx].name;
-          offlineHomes[existingIdx].email = data.email || cleanEmail;
-          this.saveRegisteredHomesOffline(offlineHomes);
-        } else {
-          offlineHomes.push({
-            id: data.homeId,
-            name: data.homeName || data.name || 'Home',
+        if (res.ok) {
+          this.isServerMode = true;
+          const data = await res.json();
+          const user: AuthUser = {
+            token: data.token,
+            role: 'admin',
+            name: data.name || 'Home',
             email: data.email || cleanEmail,
-            password: cleanPass,
-            created_at: new Date().toISOString(),
-          });
-          this.saveRegisteredHomesOffline(offlineHomes);
-        }
+            homeId: data.homeId,
+            homeName: data.homeName || data.name || 'Home',
+            home: data.home,
+          };
+          this.setCurrentUser(user);
 
-        return user;
-      } else {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Invalid home email or password.');
+          // Mirror in offline cache for subsequent offline sessions
+          const offlineHomes = this.getRegisteredHomesOffline();
+          const existingIdx = offlineHomes.findIndex((h) => h.id === data.homeId || (h.email && h.email.toLowerCase() === cleanEmail));
+          if (existingIdx !== -1) {
+            offlineHomes[existingIdx].password = cleanPass;
+            offlineHomes[existingIdx].name = data.homeName || data.name || offlineHomes[existingIdx].name;
+            offlineHomes[existingIdx].email = data.email || cleanEmail;
+            this.saveRegisteredHomesOffline(offlineHomes);
+          } else {
+            offlineHomes.push({
+              id: data.homeId,
+              name: data.homeName || data.name || 'Home',
+              email: data.email || cleanEmail,
+              password: cleanPass,
+              created_at: new Date().toISOString(),
+            });
+            this.saveRegisteredHomesOffline(offlineHomes);
+          }
+
+          return user;
+        } else if (res.status === 401 || res.status === 400) {
+          // Explicit validation response from a real active server
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Invalid home email or password.');
+        }
+      } catch (err: unknown) {
+        if (err instanceof Error && (err.message.includes('Invalid home email') || err.message.includes('Please enter'))) {
+          throw err;
+        }
+        this.isServerMode = false;
       }
-    } catch (err: unknown) {
-      // Re-throw explicit validation errors from server
-      if (err instanceof Error && err.message && !err.message.includes('Failed to fetch')) {
-        throw err;
-      }
-      this.isServerMode = false;
     }
 
     // 2. Offline / LocalStorage Cache Fallback
@@ -679,32 +726,34 @@ export class FamilyService {
       return this.loginSuperAdmin('2000');
     }
 
-    // 1. Server API Call
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobile_number: cleanPhone }),
-      });
+    // 1. Server API Call (if live server endpoint is configured)
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mobile_number: cleanPhone }),
+        });
 
-      if (res.ok) {
-        this.isServerMode = true;
-        const data = await res.json();
-        const user: AuthUser = {
-          token: data.token,
-          role: 'member',
-          name: data.name,
-          mobile_number: data.mobile_number,
-          memberId: data.memberId,
-          homeId: data.homeId,
-          homeName: data.homeName,
-          member: data.member,
-        };
-        this.setCurrentUser(user);
-        return user;
+        if (res.ok) {
+          this.isServerMode = true;
+          const data = await res.json();
+          const user: AuthUser = {
+            token: data.token,
+            role: 'member',
+            name: data.name,
+            mobile_number: data.mobile_number,
+            memberId: data.memberId,
+            homeId: data.homeId,
+            homeName: data.homeName,
+            member: data.member,
+          };
+          this.setCurrentUser(user);
+          return user;
+        }
+      } catch {
+        this.isServerMode = false;
       }
-    } catch {
-      this.isServerMode = false;
     }
 
     // 2. Offline Fallback for Member
@@ -828,23 +877,43 @@ export class FamilyService {
   // SUPER ADMIN PLATFORM MANAGEMENT METHODS
   // ==========================================
   public static async getSuperAdminHomes(): Promise<Home[]> {
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/super-admin/homes`, {
-        headers: this.getHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return Array.isArray(data)
-          ? data.map((h: any) => ({
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/super-admin/homes`, {
+          headers: this.getHeaders(),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            // Mirror fetched homes into offline storage so offline fallback stays synced
+            const offlineHomes = this.getRegisteredHomesOffline();
+            for (const h of data) {
+              const idx = offlineHomes.findIndex((oh) => oh.id === h.id || (oh.email && oh.email.toLowerCase() === h.email?.toLowerCase()));
+              if (idx !== -1) {
+                offlineHomes[idx].name = h.name;
+                offlineHomes[idx].email = h.email;
+              } else {
+                offlineHomes.push({
+                  id: h.id,
+                  name: h.name,
+                  email: h.email,
+                  created_at: h.created_at || new Date().toISOString(),
+                });
+              }
+            }
+            this.saveRegisteredHomesOffline(offlineHomes);
+
+            return data.map((h: any) => ({
               ...h,
               member_count: Number(h.member_count) || 0,
               photo_count: Number(h.photo_count) || 0,
               location_usage_count: Number(h.location_usage_count) || 0,
               last_active_at: h.last_active_at || h.updated_at || h.created_at || 'Recently',
-            }))
-          : [];
-      }
-    } catch {}
+            }));
+          }
+        }
+      } catch {}
+    }
 
     // Offline mode: compute actual member and photo counts per home partition
     const offlineHomes = this.getRegisteredHomesOffline();
@@ -976,14 +1045,16 @@ export class FamilyService {
   }
 
   public static async getSuperAdminHomeMembers(homeId: string): Promise<FamilyMember[]> {
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}/members`, {
-        headers: this.getHeaders(homeId),
-      });
-      if (res.ok) {
-        return await res.json();
-      }
-    } catch {}
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}/members`, {
+          headers: this.getHeaders(homeId),
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch {}
+    }
     return await this.getAll(homeId);
   }
 
@@ -996,53 +1067,63 @@ export class FamilyService {
       throw new Error('Name, Email, and Password are required.');
     }
 
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/super-admin/homes`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({ name: cleanName, email: cleanEmail, password: cleanPass }),
-      });
-      if (res.ok) {
-        this.isServerMode = true;
-        const created = await res.json();
-        // Mirror in offline cache so Super Admin and Home Login can use it offline immediately
-        const offlineHomes = this.getRegisteredHomesOffline();
-        const existingIdx = offlineHomes.findIndex((h) => h.id === created.id || (h.email && h.email.toLowerCase() === cleanEmail));
-        if (existingIdx !== -1) {
-          offlineHomes[existingIdx] = {
-            ...offlineHomes[existingIdx],
-            name: cleanName,
-            email: cleanEmail,
-            password: cleanPass,
-          };
-        } else {
-          offlineHomes.push({
-            id: created.id,
-            name: cleanName,
-            email: cleanEmail,
-            password: cleanPass,
-            created_at: created.created_at || new Date().toISOString(),
-          });
-        }
-        this.saveRegisteredHomesOffline(offlineHomes);
-        return created;
-      } else {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to create home.');
-      }
-    } catch (e: any) {
-      if (e.message && (e.message.includes('already registered') || e.message.includes('required') || e.message.includes('Forbidden'))) {
-        throw e;
-      }
-      this.isServerMode = false;
-    }
-
-    // Offline / GitHub Pages Fallback
+    // Check duplicate in offline cache first
     const offlineHomes = this.getRegisteredHomesOffline();
     if (offlineHomes.some((h) => h.email && h.email.toLowerCase() === cleanEmail)) {
       throw new Error(`Home email "${cleanEmail}" is already registered. Email must be unique.`);
     }
 
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/super-admin/homes`, {
+          method: 'POST',
+          headers: this.getHeaders(),
+          body: JSON.stringify({ name: cleanName, email: cleanEmail, password: cleanPass }),
+        });
+        if (res.ok) {
+          this.isServerMode = true;
+          const created = await res.json();
+          const existingIdx = offlineHomes.findIndex((h) => h.id === created.id || (h.email && h.email.toLowerCase() === cleanEmail));
+          if (existingIdx !== -1) {
+            offlineHomes[existingIdx] = {
+              ...offlineHomes[existingIdx],
+              name: cleanName,
+              email: cleanEmail,
+              password: cleanPass,
+            };
+          } else {
+            offlineHomes.push({
+              id: created.id,
+              name: cleanName,
+              email: cleanEmail,
+              password: cleanPass,
+              created_at: created.created_at || new Date().toISOString(),
+            });
+          }
+          this.saveRegisteredHomesOffline(offlineHomes);
+          return {
+            id: created.id,
+            name: cleanName,
+            email: cleanEmail,
+            created_at: created.created_at || new Date().toISOString(),
+            member_count: 0,
+            photo_count: 0,
+            location_usage_count: 0,
+            last_active_at: new Date().toISOString(),
+          };
+        } else if (res.status === 409) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Home email "${cleanEmail}" is already registered. Email must be unique.`);
+        }
+      } catch (e: any) {
+        if (e.message && (e.message.includes('already registered') || e.message.includes('required'))) {
+          throw e;
+        }
+        this.isServerMode = false;
+      }
+    }
+
+    // Offline / Standalone / GitHub Pages Fallback
     const newHomeId = 'home_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
     const now = new Date().toISOString();
     const newHomeRecord = {
@@ -1067,43 +1148,46 @@ export class FamilyService {
     };
   }
 
-  public static async setHomePassword(homeId: string, password: string): Promise<boolean> {
+  public static async resetHomePassword(homeId: string, password: string, email?: string): Promise<boolean> {
     const cleanPass = String(password || '').trim();
     if (!cleanPass || cleanPass.length < 3) {
       throw new Error('Password must be at least 3 characters.');
     }
 
-    // Always update local cache mirror
+    // Always update local cache mirror by matching homeId OR email
     try {
       const offlineHomes = this.getRegisteredHomesOffline();
-      const idx = offlineHomes.findIndex((h) => h.id === homeId);
+      const idx = offlineHomes.findIndex(
+        (h) => h.id === homeId || (email && h.email && h.email.toLowerCase() === email.trim().toLowerCase())
+      );
       if (idx !== -1) {
         offlineHomes[idx].password = cleanPass;
         this.saveRegisteredHomesOffline(offlineHomes);
       }
     } catch {}
 
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}/password`, {
-        method: 'PUT',
-        headers: this.getHeaders(homeId),
-        body: JSON.stringify({ password: cleanPass }),
-      });
-      if (res.ok) {
-        this.isServerMode = true;
-        return true;
-      } else {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to update password.');
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}/password`, {
+          method: 'PUT',
+          headers: this.getHeaders(homeId),
+          body: JSON.stringify({ password: cleanPass }),
+        });
+        if (res.ok) {
+          this.isServerMode = true;
+          return true;
+        }
+      } catch (e: any) {
+        this.isServerMode = false;
       }
-    } catch (e: any) {
-      if (e.message && (e.message.includes('characters') || e.message.includes('Forbidden'))) {
-        throw e;
-      }
-      this.isServerMode = false;
     }
 
     return true;
+  }
+
+  // Alias for backwards compatibility
+  public static async setHomePassword(homeId: string, password: string, email?: string): Promise<boolean> {
+    return this.resetHomePassword(homeId, password, email);
   }
 
   // --- Real-Time Internet Calling APIs ---
@@ -1219,21 +1303,19 @@ export class FamilyService {
       localStorage.removeItem(this.getGalleryStorageKey(homeId));
     } catch {}
 
-    try {
-      const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}`, {
-        method: 'DELETE',
-        headers: this.getHeaders(homeId),
-      });
-      if (res.ok) {
-        this.isServerMode = true;
-        return true;
-      } else {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to delete home.');
+    if (this.hasLiveServerEndpoint()) {
+      try {
+        const res = await fetch(`${this.getApiBase()}/api/super-admin/homes/${homeId}`, {
+          method: 'DELETE',
+          headers: this.getHeaders(homeId),
+        });
+        if (res.ok) {
+          this.isServerMode = true;
+          return true;
+        }
+      } catch (e: any) {
+        this.isServerMode = false;
       }
-    } catch (e: any) {
-      if (e.message && e.message.includes('Forbidden')) throw e;
-      this.isServerMode = false;
     }
 
     return true;

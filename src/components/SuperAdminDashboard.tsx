@@ -31,10 +31,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [newHomePassword, setNewHomePassword] = useState<string>('');
   const [isSubmittingCreate, setIsSubmittingCreate] = useState<boolean>(false);
 
-  // Modal: Set Password
-  const [passwordTargetHome, setPasswordTargetHome] = useState<Home | null>(null);
-  const [targetNewPassword, setTargetNewPassword] = useState<string>('');
-  const [isSubmittingPassword, setIsSubmittingPassword] = useState<boolean>(false);
+  // Modal: Reset Password
+  const [resetTargetHome, setResetTargetHome] = useState<Home | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState<string>('');
+  const [isSubmittingReset, setIsSubmittingReset] = useState<boolean>(false);
 
   // Modal: Delete Home
   const [deleteTargetHome, setDeleteTargetHome] = useState<Home | null>(null);
@@ -47,10 +47,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setIsCreateModalOpen(true);
   };
 
-  // Helper to open set password modal with fresh blank input
-  const handleOpenSetPasswordModal = (home: Home) => {
-    setPasswordTargetHome(home);
-    setTargetNewPassword('');
+  // Helper to open reset password modal with fresh blank input
+  const handleOpenResetPasswordModal = (home: Home) => {
+    setResetTargetHome(home);
+    setResetNewPassword('');
   };
 
   // Load all homes
@@ -116,36 +116,39 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     }
   };
 
-  // Submit Set Password
-  const handleSetPassword = async (e: React.FormEvent) => {
+  // Submit Reset Password
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!passwordTargetHome || !targetNewPassword.trim()) return;
+    if (!resetTargetHome || !resetNewPassword.trim()) return;
 
     try {
-      setIsSubmittingPassword(true);
-      await FamilyService.setHomePassword(passwordTargetHome.id, targetNewPassword.trim());
-      onShowToast(`Password for "${passwordTargetHome.name}" updated successfully!`, 'success');
-      setPasswordTargetHome(null);
-      setTargetNewPassword('');
+      setIsSubmittingReset(true);
+      await FamilyService.resetHomePassword(resetTargetHome.id, resetNewPassword.trim(), resetTargetHome.email);
+      onShowToast(`Password for "${resetTargetHome.name}" reset successfully!`, 'success');
+      setResetTargetHome(null);
+      setResetNewPassword('');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to update password.';
+      const msg = err instanceof Error ? err.message : 'Failed to reset password.';
       onShowToast(msg, 'error');
     } finally {
-      setIsSubmittingPassword(false);
+      setIsSubmittingReset(false);
     }
   };
 
   // Confirm Delete Home
   const handleDeleteHome = async () => {
     if (!deleteTargetHome) return;
+    const targetName = deleteTargetHome.name;
+    const targetId = deleteTargetHome.id;
     try {
-      await FamilyService.deleteHome(deleteTargetHome.id);
-      onShowToast(`Home "${deleteTargetHome.name}" deleted.`, 'success');
-      setDeleteTargetHome(null);
-      await loadHomes();
+      await FamilyService.deleteHome(targetId);
+      onShowToast(`Home "${targetName}" deleted successfully.`, 'success');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to delete home.';
       onShowToast(msg, 'error');
+    } finally {
+      setDeleteTargetHome(null);
+      await loadHomes();
     }
   };
 
@@ -302,10 +305,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => handleOpenSetPasswordModal(h)}
-                        className="text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-xl transition"
+                        data-testid="sa-btn-reset-password"
+                        onClick={() => handleOpenResetPasswordModal(h)}
+                        className="text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-xl transition cursor-pointer"
                       >
-                        🔑 Set Password
+                        🔄 Reset Password
                       </button>
 
                       {(onEnterHomeAudit || onEnterHomeAsAdmin) && (
@@ -320,8 +324,9 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
                       <button
                         type="button"
+                        data-testid="sa-btn-delete-home"
                         onClick={() => setDeleteTargetHome(h)}
-                        className="text-xs font-bold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 px-2.5 py-1.5 rounded-xl transition"
+                        className="text-xs font-bold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 px-2.5 py-1.5 rounded-xl transition cursor-pointer"
                         title="Delete Home"
                       >
                         🗑️
@@ -453,25 +458,29 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         </div>
       )}
 
-      {/* Modal: Set / Reset Home Password */}
-      {passwordTargetHome && (
+      {/* Modal: Reset Home Password */}
+      {resetTargetHome && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-70 animate-fadeIn">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 animate-scaleUp">
-            <h3 className="text-base font-extrabold text-slate-900 mb-1">
-              Set Password for "{passwordTargetHome.name}"
-            </h3>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xl">🔄</span>
+              <h3 className="text-base font-extrabold text-slate-900">
+                Reset Password for "{resetTargetHome.name}"
+              </h3>
+            </div>
             <p className="text-xs text-slate-500 mb-4">
-              Enter a new password for this home. The administrator can use this to sign in.
+              Enter a new password for <span className="font-semibold text-slate-700">{resetTargetHome.email}</span>. The home administrator can immediately sign in with this new password.
             </p>
 
-            <form onSubmit={handleSetPassword} className="space-y-3.5">
+            <form onSubmit={handleResetPassword} className="space-y-3.5" data-testid="sa-form-reset-password">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">New Password</label>
                 <input
                   type="password"
+                  data-testid="sa-input-reset-password"
                   required
-                  value={targetNewPassword}
-                  onChange={(e) => setTargetNewPassword(e.target.value)}
+                  value={resetNewPassword}
+                  onChange={(e) => setResetNewPassword(e.target.value)}
                   placeholder="Enter new password"
                   autoComplete="new-password"
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-600"
@@ -482,17 +491,19 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               <div className="flex items-center gap-3 pt-3">
                 <button
                   type="button"
-                  onClick={() => setPasswordTargetHome(null)}
+                  data-testid="sa-btn-cancel-reset"
+                  onClick={() => setResetTargetHome(null)}
                   className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmittingPassword}
-                  className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition disabled:opacity-50"
+                  data-testid="sa-btn-submit-reset-password"
+                  disabled={isSubmittingReset}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 transition disabled:opacity-50"
                 >
-                  {isSubmittingPassword ? 'Saving...' : 'Update Password'}
+                  {isSubmittingReset ? 'Resetting...' : 'Reset Password'}
                 </button>
               </div>
             </form>
@@ -518,6 +529,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             <div className="flex items-center justify-center gap-3 mt-5">
               <button
                 type="button"
+                data-testid="sa-btn-cancel-delete-home"
                 onClick={() => setDeleteTargetHome(null)}
                 className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
               >
@@ -525,6 +537,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               </button>
               <button
                 type="button"
+                data-testid="sa-btn-confirm-delete-home"
                 onClick={handleDeleteHome}
                 className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition"
               >
