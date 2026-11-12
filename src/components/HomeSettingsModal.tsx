@@ -6,16 +6,19 @@ interface HomeSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: AuthUser;
-  onSettingsUpdated: (updatedHomeName: string) => void;
+  noticeboardMessage?: string;
+  onSettingsUpdated: (updatedHomeName: string, noticeboard?: string) => void;
 }
 
 export const HomeSettingsModal: React.FC<HomeSettingsModalProps> = ({
   isOpen,
   onClose,
   currentUser,
+  noticeboardMessage = '',
   onSettingsUpdated,
 }) => {
   const [homeName, setHomeName] = useState<string>(currentUser.homeName || currentUser.name || '');
+  const [noticeboard, setNoticeboard] = useState<string>(noticeboardMessage);
   const [currentPassword, setCurrentPassword] = useState<string>('');
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
@@ -56,10 +59,11 @@ export const HomeSettingsModal: React.FC<HomeSettingsModalProps> = ({
       const res = await FamilyService.updateHomeProfile(
         cleanName !== currentUser.homeName ? cleanName : undefined,
         isChangingPassword ? currentPassword : undefined,
-        isChangingPassword ? newPassword : undefined
+        isChangingPassword ? newPassword : undefined,
+        noticeboard !== noticeboardMessage ? noticeboard : undefined
       );
 
-      onSettingsUpdated(res.homeName);
+      onSettingsUpdated(res.homeName, res.noticeboard || noticeboard);
       onClose();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update home settings.';
@@ -127,6 +131,30 @@ export const HomeSettingsModal: React.FC<HomeSettingsModalProps> = ({
                 required
               />
             </div>
+          </div>
+
+          {/* Household Noticeboard Banner */}
+          <div>
+            <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 ml-1">
+              Family Bulletin / Noticeboard Message
+            </label>
+            <div className="relative">
+              <textarea
+                name="settings_noticeboard_input"
+                data-testid="settings-input-noticeboard"
+                value={noticeboard}
+                onChange={(e) => {
+                  setNoticeboard(e.target.value);
+                  setError(null);
+                }}
+                rows={2}
+                placeholder="e.g. Family dinner this Sunday at 7 PM! Everyone is welcome."
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition"
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1 ml-1 font-medium">
+              📢 This message will be displayed at the top of the household dashboard for all family members.
+            </p>
           </div>
 
           {/* Registered Email (Read-Only) */}

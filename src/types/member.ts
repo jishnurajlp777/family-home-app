@@ -30,9 +30,13 @@ export interface FamilyMember {
   home_id?: string;
   name: string;
   mobile_number: string;
+  pin?: string;
+  pin_hash?: string;
+  pin_set?: boolean;
   caricature_key: CaricatureType;
   image_url?: string;
   role: string;
+  family_role?: string;
   bio: string;
   tags: string[];
   room_title: string;
@@ -52,9 +56,11 @@ export interface NewMemberInput {
   home_id?: string;
   name: string;
   mobile_number: string;
+  pin?: string;
   caricature_key: CaricatureType;
   image_url?: string;
   role: string;
+  family_role?: string;
   quote?: string;
   bio?: string;
   tags?: string[];
@@ -66,7 +72,7 @@ export interface NewMemberInput {
   location?: MemberLocation;
 }
 
-export type UpdateMemberInput = Partial<FamilyMember>;
+export type UpdateMemberInput = Partial<FamilyMember> & { pin?: string };
 
 export interface GalleryItem {
   id: string;
@@ -84,6 +90,7 @@ export interface Home {
   id: string;
   name: string;
   email: string;
+  noticeboard?: string;
   created_at?: string;
   updated_at?: string;
   last_active_at?: string;
@@ -119,6 +126,8 @@ export interface AuthUser {
   home?: Home;
   memberId?: string;
   member?: FamilyMember;
+  pin?: string;
+  requirePinSetup?: boolean;
 }
 
 export interface CallParticipant {

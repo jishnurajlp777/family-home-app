@@ -28,6 +28,8 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
 }) => {
   const [name, setName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
+  const [pin, setPin] = useState('1234');
+  const [familyRole, setFamilyRole] = useState<string>('Member');
   const [role, setRole] = useState('');
   const [caricatureKey, setCaricatureKey] = useState<CaricatureType>('boy');
   const [imageUrl, setImageUrl] = useState('');
@@ -97,7 +99,9 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
       await onAdd({
         name: cleanName,
         mobile_number: cleanPhone,
-        role: role.trim() || 'Family Member',
+        pin: pin.trim() || '1234',
+        family_role: familyRole,
+        role: role.trim() || (familyRole !== 'Member' ? familyRole : 'Family Member'),
         caricature_key: caricatureKey,
         image_url: imageUrl.trim() || undefined,
         bio: bio.trim() || undefined,
@@ -107,6 +111,8 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
       // Reset form
       setName('');
       setMobileNumber('');
+      setPin('1234');
+      setFamilyRole('Member');
       setRole('');
       setCaricatureKey('boy');
       setImageUrl('');
@@ -178,23 +184,66 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
             </div>
           </div>
 
-          {/* Mandatory Mobile Number */}
+          {/* Mandatory Mobile Number & 4-Digit PIN */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Mobile Number <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="tel"
+                data-testid="add-member-input-mobile"
+                value={mobileNumber}
+                onChange={(e) => setMobileNumber(e.target.value)}
+                placeholder="e.g. 9876543214"
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-sm font-medium outline-hidden"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                4-Digit Room PIN <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="password"
+                maxLength={6}
+                data-testid="add-member-input-pin"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                placeholder="e.g. 1234"
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-sm font-medium outline-hidden tracking-widest"
+              />
+            </div>
+          </div>
+
+          {/* Family Role Picker */}
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Mobile Number (Mandatory for Login) <span className="text-rose-500">*</span>
+              Family Role Hierarchy
             </label>
-            <input
-              type="tel"
-              data-testid="add-member-input-mobile"
-              value={mobileNumber}
-              onChange={(e) => setMobileNumber(e.target.value)}
-              placeholder="e.g. 9876543214 (Used by this member to log in)"
-              required
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-sm font-medium outline-hidden"
-            />
-            <p className="text-[11px] text-slate-400 mt-1 font-medium">
-              🔒 Mandatory: The member will use this mobile number to log in and access their profile.
-            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { key: 'Parent / Guardian', icon: '👑', label: 'Parent / Guardian' },
+                { key: 'Child / Youth', icon: '🎒', label: 'Child / Youth' },
+                { key: 'Senior', icon: '👓', label: 'Elder / Senior' },
+                { key: 'Member', icon: '🏡', label: 'Member' },
+              ].map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => setFamilyRole(r.key)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    familyRole === r.key
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-xs'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>{r.icon}</span>
+                  <span className="truncate">{r.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Avatar / Image Add or Remove */}

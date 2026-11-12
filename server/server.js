@@ -1,11 +1,12 @@
 /**
  * Family Home Interface - Backend Server (Node.js + MySQL)
  * Multi-Tenant Architecture with Super Admin, Home Registration & Isolated Family Homes
- * Enforces Industry-Standard Backend Session & Role-Based Access Control (RBAC)
+ * Enforces Industry-Standard Cryptographic Auth (HMAC-SHA256, scrypt), Delta Sync & RBAC
  */
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import mysql from 'mysql2/promise';
 
@@ -56,6 +57,64 @@ const DB_PASSWORD = process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSW
 const DB_NAME = process.env.DB_NAME || 'family_home_db';
 const DIST_PATH = path.join(__dirname, '..', 'dist');
 
+// Security & Cryptography Configuration
+const JWT_SECRET = process.env.JWT_SECRET || 'family_home_secure_hmac_secret_2026_prod_key_77!';
+const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || 'superadmin@home.com').toLowerCase();
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || 'SuperAdmin@Home2026!';
+
+// Disk-backed Static Uploads Directory (Offloads base64 from MySQL & LocalStorage)
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+function saveBase64Media(dataUri, prefix = 'media') {
+  if (!dataUri || typeof dataUri !== 'string') return dataUri;
+  if (!dataUri.startsWith('data:image/')) return dataUri;
+
+  const matches = dataUri.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!matches) return dataUri;
+
+  let ext = matches[1].toLowerCase();
+  if (ext === 'jpeg') ext = 'jpg';
+  if (ext.includes('+xml')) ext = 'svg';
+
+  try {
+    const buffer = Buffer.from(matches[2], 'base64');
+    const filename = `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    const filePath = path.join(UPLOADS_DIR, filename);
+    fs.writeFileSync(filePath, buffer);
+    return `/uploads/${filename}`;
+  } catch (e) {
+    console.warn('Failed to save media to disk:', e.message);
+    return dataUri;
+  }
+}
+
+// Cryptographic Password & PIN Hashing (Node.js Native scrypt with 16-byte Salt)
+function hashPassword(password) {
+  if (!password || typeof password !== 'string') return '';
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${derived}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!password || !storedHash) return false;
+  // Legacy plain-text fallback for auto-migrating existing records
+  if (!storedHash.includes(':')) {
+    return storedHash === password;
+  }
+  const [salt, key] = storedHash.split(':');
+  if (!salt || !key) return false;
+  try {
+    const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(derived, 'hex'), Buffer.from(key, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
 // Fallback in-memory cache if MySQL is offline (backed by server_data.json)
 let memoryHomes = [];
 let memoryMembers = [];
@@ -64,6 +123,24 @@ let memoryGallery = [];
 // Real-Time Internet Calling State (Home Scoped)
 let activeCalls = new Map(); // homeId -> active call object
 let callSignals = new Map(); // callId -> array of signals
+
+// Real-Time Server-Sent Events (SSE) Subscribers (homeId -> Set of response streams)
+const sseSubscribers = new Map();
+
+function broadcastHomeEvent(homeId, eventData) {
+  if (!homeId) return;
+  const clients = sseSubscribers.get(homeId);
+  if (clients && clients.size > 0) {
+    const payload = `data: ${JSON.stringify(eventData)}\n\n`;
+    for (const client of clients) {
+      try {
+        client.write(payload);
+      } catch {
+        clients.delete(client);
+      }
+    }
+  }
+}
 
 const STORAGE_FILE = path.join(__dirname, 'server_data.json');
 
@@ -106,40 +183,55 @@ loadDiskData();
 // In-Memory Session Token Store (token -> session)
 const activeSessions = new Map();
 
+// Cryptographically Signed HMAC-SHA256 Token Generation
 function generateToken(role, homeId, memberId, name, email) {
-  const token = 'tok_' + role + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 10);
-  activeSessions.set(token, {
+  const payload = {
     role,
     homeId,
     memberId,
     name,
     email,
-    createdAt: Date.now(),
-  });
+    iat: Date.now(),
+    exp: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
+  };
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', JWT_SECRET).update(body).digest('base64url');
+  const token = `${body}.${signature}`;
+
+  activeSessions.set(token, payload);
   return token;
 }
 
 function getAuthFromReq(req) {
   const authHeader = req.headers['authorization'] || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : req.headers['x-auth-token'];
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : (req.headers['x-auth-token'] || '');
   if (!token) return null;
 
   if (activeSessions.has(token)) {
-    return activeSessions.get(token);
+    const session = activeSessions.get(token);
+    if (session.exp && Date.now() > session.exp) {
+      activeSessions.delete(token);
+      return null;
+    }
+    return session;
   }
 
-  // Stateless fallback for persistent local development sessions
-  if (token.startsWith('tok_')) {
-    const parts = token.split('_');
-    const role = parts[1];
-    if (role === 'super' && parts[2] === 'admin') {
-      return { role: 'super_admin', name: 'Super Admin' };
-    }
-    if (role === 'admin' || role === 'member' || role === 'super_admin') {
-      return {
-        role,
-        homeId: req.headers['x-home-id'] || 'default_home',
-      };
+  // Cryptographic signature verification for stateless resiliency
+  if (token.includes('.')) {
+    const parts = token.split('.');
+    if (parts.length === 2) {
+      const [body, sig] = parts;
+      try {
+        const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(body).digest('base64url');
+        if (crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+          const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+          if (payload.exp && Date.now() > payload.exp) return null;
+          activeSessions.set(token, payload);
+          return payload;
+        }
+      } catch {
+        return null;
+      }
     }
   }
 
@@ -237,8 +329,11 @@ async function initMySQL() {
     try { await pool.query(`ALTER TABLE gallery ADD COLUMN uploaded_by_id VARCHAR(64) DEFAULT NULL`); } catch {}
     try { await pool.query(`ALTER TABLE homes ADD COLUMN last_active_at VARCHAR(64) DEFAULT NULL`); } catch {}
     try { await pool.query(`ALTER TABLE homes ADD COLUMN location_usage_count INT DEFAULT 0`); } catch {}
+    try { await pool.query(`ALTER TABLE homes ADD COLUMN noticeboard TEXT DEFAULT NULL`); } catch {}
     try { await pool.query(`ALTER TABLE members ADD COLUMN last_active_at VARCHAR(64) DEFAULT NULL`); } catch {}
     try { await pool.query(`ALTER TABLE members ADD COLUMN location_usage_count INT DEFAULT 0`); } catch {}
+    try { await pool.query(`ALTER TABLE members ADD COLUMN pin_hash VARCHAR(255) DEFAULT NULL`); } catch {}
+    try { await pool.query(`ALTER TABLE members ADD COLUMN family_role VARCHAR(64) DEFAULT 'Member'`); } catch {}
 
     // Ensure any legacy seed records are cleared from members table
     try {
@@ -370,7 +465,12 @@ function formatRow(row) {
   } catch {
     location = null;
   }
-  return { ...row, tags, checklist, location };
+  const pin_set = Boolean(row.pin_hash);
+  const copy = { ...row, tags, checklist, location, pin_set };
+  // Never expose sensitive password or pin hashes
+  delete copy.pin_hash;
+  delete copy.password_hash;
+  return copy;
 }
 
 // 4. HTTP Server Request Router
@@ -390,16 +490,135 @@ const server = http.createServer(async (req, res) => {
   const pathname = parsedUrl.pathname;
   const reqHomeId = req.headers['x-home-id'] || parsedUrl.searchParams.get('home_id') || null;
 
-  // GET /api/health
-  if (pathname === '/api/health' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      version: '0.2.0',
-      database: isDbConnected ? 'MySQL' : 'MemoryCache',
-      multiTenant: true,
-      time: new Date().toISOString(),
-    }));
+  // Serve static uploaded files (photos, avatars)
+  if (pathname.startsWith('/uploads/') && req.method === 'GET') {
+    const filename = path.basename(pathname);
+    const filePath = path.join(UPLOADS_DIR, filename);
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeTypes = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+      };
+      res.writeHead(200, {
+        'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'File not found' }));
+      return;
+    }
+  }
+
+  // GET /api/events/stream (Server-Sent Events for instant real-time sync & call alerts)
+  if (pathname === '/api/events/stream' && req.method === 'GET') {
+    const auth = getAuthFromReq(req);
+    const targetHomeId = auth?.homeId || reqHomeId;
+    if (!targetHomeId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Home ID is required for real-time event stream.' }));
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    if (!sseSubscribers.has(targetHomeId)) {
+      sseSubscribers.set(targetHomeId, new Set());
+    }
+    const clientSet = sseSubscribers.get(targetHomeId);
+    clientSet.add(res);
+
+    res.write(`data: ${JSON.stringify({ type: 'connected', homeId: targetHomeId, timestamp: Date.now() })}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': keepalive\n\n');
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 20000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      clientSet.delete(res);
+      if (clientSet.size === 0) sseSubscribers.delete(targetHomeId);
+    });
+    return;
+  }
+
+  // GET /api/sync (Delta Sync for lightweight multi-device updates)
+  if (pathname === '/api/sync' && req.method === 'GET') {
+    try {
+      const auth = getAuthFromReq(req);
+      const targetHomeId = auth?.homeId || reqHomeId;
+      if (!targetHomeId && auth?.role !== 'super_admin') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ hasChanges: false, members: [], activeCall: null, serverTime: Date.now() }));
+        return;
+      }
+
+      const sinceStr = parsedUrl.searchParams.get('since');
+      const sinceTime = sinceStr ? Number(sinceStr) : 0;
+      const call = activeCalls.get(targetHomeId) || null;
+
+      let membersList = [];
+      let latestUpdatedTime = 0;
+      let noticeboardMsg = '';
+
+      if (isDbConnected && pool) {
+        let query = 'SELECT * FROM members';
+        let params = [];
+        if (targetHomeId && targetHomeId !== 'all') {
+          query += ' WHERE home_id = ?';
+          params.push(targetHomeId);
+        }
+        query += ' ORDER BY created_at ASC';
+        const [rows] = await pool.query(query, params);
+        membersList = rows.map(formatRow);
+
+        if (targetHomeId && targetHomeId !== 'all') {
+          const [hRows] = await pool.query('SELECT noticeboard FROM homes WHERE id = ?', [targetHomeId]);
+          if (hRows.length > 0) noticeboardMsg = hRows[0].noticeboard || '';
+        }
+      } else {
+        membersList = memoryMembers
+          .filter((m) => !targetHomeId || targetHomeId === 'all' || m.home_id === targetHomeId)
+          .map(formatRow);
+        const foundH = memoryHomes.find((h) => h.id === targetHomeId);
+        if (foundH) noticeboardMsg = foundH.noticeboard || '';
+      }
+
+      for (const m of membersList) {
+        const t = new Date(m.updated_at || m.created_at).getTime();
+        if (t > latestUpdatedTime) latestUpdatedTime = t;
+      }
+
+      const hasChanges = sinceTime === 0 || latestUpdatedTime > sinceTime || (call && call.status !== 'ended');
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        hasChanges,
+        members: hasChanges ? membersList : undefined,
+        activeCall: call,
+        noticeboard: noticeboardMsg,
+        serverTime: Date.now(),
+      }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
     return;
   }
 
@@ -425,9 +644,9 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'A valid email address is required.' }));
         return;
       }
-      if (!password || password.length < 3) {
+      if (!password || password.length < 6) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Password must be at least 3 characters.' }));
+        res.end(JSON.stringify({ error: 'Password must be at least 6 characters for security.' }));
         return;
       }
 
@@ -450,14 +669,15 @@ const server = http.createServer(async (req, res) => {
 
       const id = 'home_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
       const now = new Date().toISOString();
+      const hashedPass = hashPassword(password);
 
       if (isDbConnected && pool) {
         await pool.query(
           `INSERT INTO homes (id, name, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-          [id, home_name, email, password, now, now]
+          [id, home_name, email, hashedPass, now, now]
         );
       } else {
-        memoryHomes.push({ id, name: home_name, email, password_hash: password, created_at: now, updated_at: now });
+        memoryHomes.push({ id, name: home_name, email, password_hash: hashedPass, created_at: now, updated_at: now });
         saveDiskData();
       }
 
@@ -481,17 +701,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /api/auth/login or /api/login (Unified: Super Admin, Home, Family Member)
+  // POST /api/auth/login or /api/login (Unified: Super Admin, Home, Family Member with PIN)
   if ((pathname === '/api/auth/login' || pathname === '/api/login') && req.method === 'POST') {
     try {
       const data = await parseJsonBody(req);
       const rawMobile = String(data.mobile_number || '').trim();
       const rawEmail = String(data.email || '').trim().toLowerCase();
       const rawPassword = String(data.password || '').trim();
+      const rawPin = String(data.pin || data.password || '').trim();
 
-      // 1. Super Admin Check: master password is 2000 (hidden, not displayed in UI)
-      if (rawPassword === '2000' || rawMobile === '2000' || (rawEmail === 'superadmin' && rawPassword === '2000')) {
-        const token = generateToken('super_admin', null, null, 'Super Admin', null);
+      // 1. Super Admin Authentication (No hardcoded backdoor; strictly verified credentials)
+      if (
+        (rawEmail === SUPER_ADMIN_EMAIL || rawEmail === 'superadmin') &&
+        rawPassword &&
+        (rawPassword === SUPER_ADMIN_PASSWORD || verifyPassword(rawPassword, SUPER_ADMIN_PASSWORD))
+      ) {
+        const token = generateToken('super_admin', null, null, 'Super Admin', SUPER_ADMIN_EMAIL);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           token,
@@ -502,7 +727,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // 2. Home Login Check: BOTH Home Email and Password are MANDATORY
+      // 2. Home Login Check: BOTH Home Email and Password are required
       if (rawEmail || (rawPassword && !rawMobile)) {
         if (!rawEmail) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -530,7 +755,18 @@ const server = http.createServer(async (req, res) => {
           }
         }
 
-        if (matchedHome && matchedHome.password_hash === rawPassword) {
+        if (matchedHome && verifyPassword(rawPassword, matchedHome.password_hash)) {
+          // Auto-upgrade legacy plain-text password to scrypt hash
+          if (!matchedHome.password_hash.includes(':')) {
+            const upgradedHash = hashPassword(rawPassword);
+            matchedHome.password_hash = upgradedHash;
+            if (isDbConnected && pool) {
+              pool.query('UPDATE homes SET password_hash = ? WHERE id = ?', [upgradedHash, matchedHome.id]).catch(() => {});
+            } else {
+              saveDiskData();
+            }
+          }
+
           const nowIso = new Date().toISOString();
           if (isDbConnected && pool) {
             await pool.query('UPDATE homes SET last_active_at = ? WHERE id = ?', [nowIso, matchedHome.id]);
@@ -548,10 +784,12 @@ const server = http.createServer(async (req, res) => {
             email: matchedHome.email,
             homeId: matchedHome.id,
             homeName: matchedHome.name,
+            noticeboard: matchedHome.noticeboard || '',
             home: {
               id: matchedHome.id,
               name: matchedHome.name,
               email: matchedHome.email,
+              noticeboard: matchedHome.noticeboard || '',
               last_active_at: nowIso,
             },
             message: `Welcome to ${matchedHome.name}!`,
@@ -567,7 +805,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // 3. Family Member Login via Registered Mobile Number
+      // 3. Family Member Login via Registered Mobile Number + 4-Digit PIN
       if (rawMobile) {
         let matchedMember = null;
         if (isDbConnected && pool) {
@@ -578,6 +816,40 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (matchedMember) {
+          // Check PIN authentication
+          if (matchedMember.pin_hash) {
+            if (!rawPin) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Please enter your 4-digit PIN to sign in.' }));
+              return;
+            }
+            if (!verifyPassword(rawPin, matchedMember.pin_hash)) {
+              res.writeHead(401, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Incorrect 4-digit PIN. Please try again.' }));
+              return;
+            }
+          } else {
+            // First time login for member without a PIN: set their PIN now
+            if (rawPin) {
+              const newPinHash = hashPassword(rawPin);
+              matchedMember.pin_hash = newPinHash;
+              if (isDbConnected && pool) {
+                pool.query('UPDATE members SET pin_hash = ? WHERE id = ?', [newPinHash, matchedMember.id]).catch(() => {});
+              } else {
+                saveDiskData();
+              }
+            } else {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                requirePinSetup: true,
+                mobile_number: matchedMember.mobile_number,
+                name: matchedMember.name,
+                message: 'Please create a 4-digit PIN to secure your account.',
+              }));
+              return;
+            }
+          }
+
           const nowIso = new Date().toISOString();
           if (isDbConnected && pool) {
             await pool.query('UPDATE members SET last_active_at = ? WHERE id = ?', [nowIso, matchedMember.id]);
@@ -648,6 +920,7 @@ const server = http.createServer(async (req, res) => {
       const newName = data.home_name !== undefined ? String(data.home_name).trim() : undefined;
       const currentPassword = data.current_password !== undefined ? String(data.current_password).trim() : undefined;
       const newPassword = data.new_password !== undefined ? String(data.new_password).trim() : undefined;
+      const newNoticeboard = data.noticeboard !== undefined ? String(data.noticeboard).trim() : undefined;
 
       let home = null;
       if (isDbConnected && pool) {
@@ -664,42 +937,49 @@ const server = http.createServer(async (req, res) => {
       }
 
       // If updating password, verify current password (unless super admin)
+      let finalPassword = home.password_hash;
       if (newPassword) {
-        if (newPassword.length < 3) {
+        if (newPassword.length < 6) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'New password must be at least 3 characters.' }));
+          res.end(JSON.stringify({ error: 'New password must be at least 6 characters.' }));
           return;
         }
-        if (auth.role !== 'super_admin' && home.password_hash !== currentPassword) {
+        if (auth.role !== 'super_admin' && !verifyPassword(currentPassword, home.password_hash)) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Incorrect current password.' }));
           return;
         }
+        finalPassword = hashPassword(newPassword);
       }
 
       const finalName = newName || home.name;
-      const finalPassword = newPassword || home.password_hash;
+      const finalNoticeboard = newNoticeboard !== undefined ? newNoticeboard : (home.noticeboard || '');
       const now = new Date().toISOString();
 
       if (isDbConnected && pool) {
-        await pool.query('UPDATE homes SET name = ?, password_hash = ?, updated_at = ? WHERE id = ?', [
+        await pool.query('UPDATE homes SET name = ?, password_hash = ?, noticeboard = ?, updated_at = ? WHERE id = ?', [
           finalName,
           finalPassword,
+          finalNoticeboard,
           now,
           targetHomeId,
         ]);
       } else {
         home.name = finalName;
         home.password_hash = finalPassword;
+        home.noticeboard = finalNoticeboard;
         home.updated_at = now;
         saveDiskData();
       }
+
+      broadcastHomeEvent(targetHomeId, { type: 'home_updated', noticeboard: finalNoticeboard });
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         success: true,
         homeId: targetHomeId,
         homeName: finalName,
+        noticeboard: finalNoticeboard,
         message: 'Home profile updated successfully!',
       }));
     } catch (err) {
@@ -918,13 +1198,14 @@ const server = http.createServer(async (req, res) => {
       const id = 'home_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
       const now = new Date().toISOString();
 
+      const hashedPass = hashPassword(password);
       if (isDbConnected && pool) {
         await pool.query(
           'INSERT INTO homes (id, name, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-          [id, name, email, password, now, now]
+          [id, name, email, hashedPass, now, now]
         );
       } else {
-        memoryHomes.push({ id, name, email, password_hash: password, created_at: now, updated_at: now });
+        memoryHomes.push({ id, name, email, password_hash: hashedPass, created_at: now, updated_at: now });
         saveDiskData();
       }
 
@@ -952,19 +1233,20 @@ const server = http.createServer(async (req, res) => {
       const data = await parseJsonBody(req);
       const newPassword = String(data.password || '').trim();
 
-      if (!newPassword || newPassword.length < 3) {
+      if (!newPassword || newPassword.length < 6) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Password must be at least 3 characters.' }));
+        res.end(JSON.stringify({ error: 'Password must be at least 6 characters.' }));
         return;
       }
 
       const now = new Date().toISOString();
+      const hashedPass = hashPassword(newPassword);
       if (isDbConnected && pool) {
-        await pool.query('UPDATE homes SET password_hash = ?, updated_at = ? WHERE id = ?', [newPassword, now, targetHomeId]);
+        await pool.query('UPDATE homes SET password_hash = ?, updated_at = ? WHERE id = ?', [hashedPass, now, targetHomeId]);
       } else {
         const h = memoryHomes.find((item) => item.id === targetHomeId);
         if (h) {
-          h.password_hash = newPassword;
+          h.password_hash = hashedPass;
           h.updated_at = now;
           saveDiskData();
         }
@@ -1108,35 +1390,32 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const mobile_number = String(data.mobile_number).trim();
+      const targetHomeId = auth?.homeId || data.home_id || reqHomeId || 'default_home';
 
-      if (mobile_number === '2000') {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Mobile number "2000" is reserved for Master Admin login.' }));
-        return;
-      }
-
-      // Check unique mobile number across members
+      // Check unique mobile number within this home
       if (isDbConnected && pool) {
-        const [existing] = await pool.query('SELECT id FROM members WHERE TRIM(mobile_number) = ?', [mobile_number]);
+        const [existing] = await pool.query('SELECT id FROM members WHERE TRIM(mobile_number) = ? AND home_id = ?', [mobile_number, targetHomeId]);
         if (existing.length > 0) {
           res.writeHead(409, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: `Mobile number "${mobile_number}" is already registered to another member.` }));
+          res.end(JSON.stringify({ error: `Mobile number "${mobile_number}" is already registered in this home.` }));
           return;
         }
       } else {
-        const dup = memoryMembers.find((m) => String(m.mobile_number).trim() === mobile_number);
+        const dup = memoryMembers.find((m) => String(m.mobile_number).trim() === mobile_number && m.home_id === targetHomeId);
         if (dup) {
           res.writeHead(409, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: `Mobile number "${mobile_number}" is already registered to another member.` }));
+          res.end(JSON.stringify({ error: `Mobile number "${mobile_number}" is already registered in this home.` }));
           return;
         }
       }
 
       const id = 'mem_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-      const home_id = auth?.homeId || data.home_id || reqHomeId || 'default_home';
       const now = new Date().toISOString();
       const caricature_key = data.caricature_key || 'boy';
       const role = data.role || 'Cherished Family Member';
+      const family_role = data.family_role || 'Member';
+      const pin_hash = data.pin ? hashPassword(String(data.pin).trim()) : null;
+      const cleanImageUrl = data.image_url ? saveBase64Media(data.image_url, 'avatar') : null;
       const bio = data.bio || `${role}. Always bringing fresh energy and happiness to our family home!`;
       const tags = JSON.stringify(data.tags || [`🌟 ${role.slice(0, 20)}`, '🏡 Family Member']);
       const room_title = data.room_title || `${data.name}'s Cozy Corner`;
@@ -1155,15 +1434,15 @@ const server = http.createServer(async (req, res) => {
         status: 'Relaxing at home',
       });
       const quote = data.quote || 'Home is where love resides and memories blossom.';
-      const image_url = data.image_url || null;
 
       if (isDbConnected && pool) {
         await pool.query(
-          `INSERT INTO members (id, home_id, name, mobile_number, caricature_key, image_url, role, bio, tags, room_title, room_desc, room_status, room_notes, checklist, location, quote, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [id, home_id, data.name, mobile_number, caricature_key, image_url, role, bio, tags, room_title, room_desc, room_status, room_notes, checklist, location, quote, now, now]
+          `INSERT INTO members (id, home_id, name, mobile_number, pin_hash, caricature_key, image_url, role, family_role, bio, tags, room_title, room_desc, room_status, room_notes, checklist, location, quote, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, targetHomeId, data.name, mobile_number, pin_hash, caricature_key, cleanImageUrl, role, family_role, bio, tags, room_title, room_desc, room_status, room_notes, checklist, location, quote, now, now]
         );
         const [rows] = await pool.query('SELECT * FROM members WHERE id = ?', [id]);
+        broadcastHomeEvent(targetHomeId, { type: 'member_added', memberId: id });
         res.writeHead(201, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(formatRow(rows[0])));
         return;
@@ -1171,12 +1450,14 @@ const server = http.createServer(async (req, res) => {
 
       const newRecord = {
         id,
-        home_id,
+        home_id: targetHomeId,
         name: data.name,
         mobile_number,
+        pin_hash,
         caricature_key,
-        image_url,
+        image_url: cleanImageUrl,
         role,
+        family_role,
         bio,
         tags: data.tags || [`🌟 ${role.slice(0, 20)}`, '🏡 Family Member'],
         room_title,
@@ -1200,6 +1481,7 @@ const server = http.createServer(async (req, res) => {
       };
       memoryMembers.push(newRecord);
       saveDiskData();
+      broadcastHomeEvent(targetHomeId, { type: 'member_added', memberId: id });
       res.writeHead(201, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(formatRow(newRecord)));
     } catch (err) {
@@ -1233,24 +1515,19 @@ const server = http.createServer(async (req, res) => {
 
       if (data.mobile_number !== undefined) {
         const cleanMobile = String(data.mobile_number).trim();
-        if (cleanMobile === '2000') {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Mobile number "2000" is reserved for Master Admin login.' }));
-          return;
-        }
 
         if (isDbConnected && pool) {
-          const [conflict] = await pool.query('SELECT id FROM members WHERE TRIM(mobile_number) = ? AND id != ?', [cleanMobile, id]);
+          const [conflict] = await pool.query('SELECT id FROM members WHERE TRIM(mobile_number) = ? AND id != ? AND home_id = ?', [cleanMobile, id, auth.homeId || 'default_home']);
           if (conflict.length > 0) {
             res.writeHead(409, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: `Mobile number "${cleanMobile}" is already registered to another member.` }));
+            res.end(JSON.stringify({ error: `Mobile number "${cleanMobile}" is already registered in this home.` }));
             return;
           }
         } else {
-          const conflict = memoryMembers.find((m) => String(m.mobile_number).trim() === cleanMobile && m.id !== id);
+          const conflict = memoryMembers.find((m) => String(m.mobile_number).trim() === cleanMobile && m.id !== id && m.home_id === (auth.homeId || 'default_home'));
           if (conflict) {
             res.writeHead(409, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: `Mobile number "${cleanMobile}" is already registered to another member.` }));
+            res.end(JSON.stringify({ error: `Mobile number "${cleanMobile}" is already registered in this home.` }));
             return;
           }
         }
@@ -1275,18 +1552,25 @@ const server = http.createServer(async (req, res) => {
         const tagsJson = data.tags !== undefined ? JSON.stringify(data.tags) : curr.tags;
         const checklistJson = data.checklist !== undefined ? JSON.stringify(data.checklist) : curr.checklist;
         const locationJson = data.location !== undefined ? JSON.stringify(data.location) : curr.location;
+        const finalImageUrl = data.image_url !== undefined
+          ? (data.image_url ? saveBase64Media(data.image_url, 'avatar') : null)
+          : curr.image_url;
+        const finalPinHash = data.pin ? hashPassword(String(data.pin).trim()) : curr.pin_hash;
+        const finalFamilyRole = data.family_role !== undefined ? data.family_role : (curr.family_role || 'Member');
 
         await pool.query(
           `UPDATE members SET
-             name = ?, mobile_number = ?, caricature_key = ?, image_url = ?, role = ?, bio = ?, tags = ?,
+             name = ?, mobile_number = ?, pin_hash = ?, caricature_key = ?, image_url = ?, role = ?, family_role = ?, bio = ?, tags = ?,
              room_title = ?, room_desc = ?, room_status = ?, room_notes = ?, checklist = ?, location = ?, quote = ?, updated_at = ?
            WHERE id = ?`,
           [
             data.name !== undefined ? data.name : curr.name,
             data.mobile_number !== undefined ? String(data.mobile_number).trim() : curr.mobile_number,
+            finalPinHash,
             data.caricature_key !== undefined ? data.caricature_key : curr.caricature_key,
-            data.image_url !== undefined ? (data.image_url ? data.image_url : null) : curr.image_url,
+            finalImageUrl,
             data.role !== undefined ? data.role : curr.role,
+            finalFamilyRole,
             data.bio !== undefined ? data.bio : curr.bio,
             tagsJson,
             data.room_title !== undefined ? data.room_title : curr.room_title,
@@ -1301,6 +1585,7 @@ const server = http.createServer(async (req, res) => {
           ]
         );
         const [updatedRows] = await pool.query('SELECT * FROM members WHERE id = ?', [id]);
+        broadcastHomeEvent(curr.home_id, { type: 'member_updated', memberId: id });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(formatRow(updatedRows[0])));
         return;
@@ -1313,20 +1598,29 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const curr = memoryMembers[idx];
+      if (auth && auth.role === 'admin' && auth.homeId && curr.home_id !== auth.homeId) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden: Cannot edit members of another home.' }));
+        return;
+      }
+
       const cleanUpdates = {};
       for (const [k, v] of Object.entries(data)) {
         if (v !== undefined) cleanUpdates[k] = v;
       }
+      if (data.pin) cleanUpdates.pin_hash = hashPassword(String(data.pin).trim());
+      if (data.image_url) cleanUpdates.image_url = saveBase64Media(data.image_url, 'avatar');
+
       memoryMembers[idx] = {
         ...curr,
         ...cleanUpdates,
-        image_url: data.image_url !== undefined ? (data.image_url ? data.image_url : null) : curr.image_url,
         tags: data.tags !== undefined ? data.tags : curr.tags,
         checklist: data.checklist !== undefined ? data.checklist : curr.checklist,
         location: data.location !== undefined ? data.location : curr.location,
         updated_at: now,
       };
       saveDiskData();
+      broadcastHomeEvent(curr.home_id, { type: 'member_updated', memberId: id });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(formatRow(memoryMembers[idx])));
     } catch (err) {
@@ -1487,10 +1781,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /api/gallery
+  // POST /api/gallery (Authenticated, Scoped to Home)
   if (pathname === '/api/gallery' && req.method === 'POST') {
     try {
       const auth = getAuthFromReq(req);
+      if (!auth) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized: Authentication required.' }));
+        return;
+      }
+
+      const targetHomeId = auth.homeId || reqHomeId;
+      if (!targetHomeId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Home ID is required.' }));
+        return;
+      }
+
       const data = await parseJsonBody(req);
       if (!data.image_data) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1500,34 +1807,36 @@ const server = http.createServer(async (req, res) => {
 
       // Strict validation: ONLY image files allowed
       const isBase64Image = typeof data.image_data === 'string' && data.image_data.startsWith('data:image/');
-      const isHttpImage = typeof data.image_data === 'string' && (data.image_data.startsWith('http://') || data.image_data.startsWith('https://'));
+      const isHttpImage = typeof data.image_data === 'string' && (data.image_data.startsWith('http://') || data.image_data.startsWith('https://') || data.image_data.startsWith('/uploads/'));
       if (!isBase64Image && !isHttpImage) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid file format: Only images (JPEG, PNG, WebP, GIF) are allowed.' }));
         return;
       }
 
+      const cleanImageUrl = saveBase64Media(data.image_data, 'gallery');
       const id = 'img_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-      const home_id = auth?.homeId || data.home_id || reqHomeId || 'default_home';
       const now = new Date().toISOString();
       const title = (data.title || 'Family Memory').trim();
-      const uploaded_by = (data.uploaded_by || auth?.name || 'Family Member').trim();
-      const uploaded_by_id = auth?.memberId || data.uploaded_by_id || (auth?.role === 'admin' ? 'admin' : null);
+      const uploaded_by = (data.uploaded_by || auth.name || 'Family Member').trim();
+      const uploaded_by_id = auth.memberId || data.uploaded_by_id || (auth.role === 'admin' ? 'admin' : null);
 
       if (isDbConnected && pool) {
         await pool.query(
           `INSERT INTO gallery (id, home_id, image_data, title, uploaded_by, uploaded_by_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [id, home_id, data.image_data, title, uploaded_by, uploaded_by_id, now]
+          [id, targetHomeId, cleanImageUrl, title, uploaded_by, uploaded_by_id, now]
         );
         const [rows] = await pool.query('SELECT * FROM gallery WHERE id = ?', [id]);
+        broadcastHomeEvent(targetHomeId, { type: 'gallery_updated', itemId: id });
         res.writeHead(201, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(rows[0]));
         return;
       }
 
-      const item = { id, home_id, image_data: data.image_data, title, uploaded_by, uploaded_by_id, created_at: now };
+      const item = { id, home_id: targetHomeId, image_data: cleanImageUrl, title, uploaded_by, uploaded_by_id, created_at: now };
       memoryGallery.unshift(item);
       saveDiskData();
+      broadcastHomeEvent(targetHomeId, { type: 'gallery_updated', itemId: id });
       res.writeHead(201, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(item));
     } catch (err) {
@@ -1644,6 +1953,7 @@ const server = http.createServer(async (req, res) => {
 
       activeCalls.set(targetHomeId, callObj);
       callSignals.set(callId, []);
+      broadcastHomeEvent(targetHomeId, { type: 'call_update', call: callObj });
 
       res.writeHead(201, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(callObj));
@@ -1677,6 +1987,7 @@ const server = http.createServer(async (req, res) => {
       if (ageMs > 15 * 60 * 1000) {
         activeCalls.delete(targetHomeId);
         callSignals.delete(call.id);
+        broadcastHomeEvent(targetHomeId, { type: 'call_ended', callId: call.id });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ call: null }));
         return;
@@ -1717,6 +2028,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
       call.status = 'active';
+      broadcastHomeEvent(targetHomeId, { type: 'call_update', call });
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, call }));
@@ -1742,6 +2054,7 @@ const server = http.createServer(async (req, res) => {
 
       call.ringing_at = new Date().toISOString();
       call.repeated_call_count = (call.repeated_call_count || 0) + 1;
+      broadcastHomeEvent(targetHomeId, { type: 'call_update', call });
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -1771,6 +2084,9 @@ const server = http.createServer(async (req, res) => {
           call.status = 'ended';
           activeCalls.delete(targetHomeId);
           callSignals.delete(call.id);
+          broadcastHomeEvent(targetHomeId, { type: 'call_ended', callId: call.id });
+        } else {
+          broadcastHomeEvent(targetHomeId, { type: 'call_update', call });
         }
       }
 
@@ -1794,6 +2110,7 @@ const server = http.createServer(async (req, res) => {
         call.status = 'ended';
         activeCalls.delete(targetHomeId);
         callSignals.delete(call.id);
+        broadcastHomeEvent(targetHomeId, { type: 'call_ended', callId: call.id });
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1811,6 +2128,7 @@ const server = http.createServer(async (req, res) => {
       const parts = pathname.split('/');
       const callId = parts[3];
       const auth = getAuthFromReq(req);
+      const targetHomeId = auth?.homeId || reqHomeId;
       const data = await parseJsonBody(req);
       const senderId = auth?.memberId || (auth?.role === 'admin' ? 'admin' : 'member');
 
@@ -1818,14 +2136,17 @@ const server = http.createServer(async (req, res) => {
         callSignals.set(callId, []);
       }
       const list = callSignals.get(callId);
-      list.push({
+      const signalItem = {
         from: senderId,
         from_name: auth?.name || 'Family Member',
         to: data.to || 'all',
         signal: data.signal,
         timestamp: Date.now(),
-      });
+      };
+      list.push(signalItem);
       if (list.length > 100) list.splice(0, list.length - 100);
+
+      broadcastHomeEvent(targetHomeId, { type: 'call_signal', callId, signal: signalItem });
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true }));

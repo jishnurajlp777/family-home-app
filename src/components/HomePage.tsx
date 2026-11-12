@@ -19,6 +19,8 @@ interface HomePageProps {
   onUpdateLocation?: (lat: number, lng: number, placeName?: string) => Promise<void>;
   onTriggerCall?: (targetId?: string) => void;
   activeCall?: ActiveCall | null;
+  noticeboardMessage?: string;
+  onUpdateNoticeboard?: (msg: string) => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
@@ -34,6 +36,8 @@ export const HomePage: React.FC<HomePageProps> = ({
   onUpdateLocation,
   onTriggerCall,
   activeCall,
+  noticeboardMessage = '',
+  onUpdateNoticeboard,
 }) => {
   const isAdmin = currentUser.role === 'admin';
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -129,6 +133,30 @@ export const HomePage: React.FC<HomePageProps> = ({
           </button>
         </div>
       </header>
+
+      {/* Household Noticeboard / Family Bulletin */}
+      <div className="bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-pink-500/10 border border-amber-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl p-2 bg-amber-100/90 rounded-xl shrink-0 shadow-2xs">📢</span>
+          <div>
+            <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-amber-900">
+              Family Bulletin & Noticeboard
+            </h3>
+            <p className="text-xs sm:text-sm font-semibold text-slate-800 mt-0.5">
+              {noticeboardMessage || 'Welcome home! Check the live radar map, visit your room sanctuary, or post a memory in the gallery.'}
+            </p>
+          </div>
+        </div>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            className="text-xs font-bold text-amber-800 hover:text-amber-900 bg-white border border-amber-300 px-3 py-1.5 rounded-xl shadow-2xs hover:bg-amber-50 cursor-pointer shrink-0 transition"
+          >
+            ✏️ Post Note
+          </button>
+        )}
+      </div>
 
       {/* Responsive Grid: Left Column (Home & Summary) + Right Column (Members, Live Map & Family Gallery) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -310,9 +338,23 @@ export const HomePage: React.FC<HomePageProps> = ({
                         <span>{m.name}</span>
                         {isOwnProfile && <span className="text-[10px] text-indigo-600 font-extrabold">(You)</span>}
                       </span>
-                      <span className="text-[11px] text-slate-400 truncate max-w-full">
-                        {m.role || 'Member'}
-                      </span>
+                      <div className="flex items-center justify-center gap-1 flex-wrap mt-0.5">
+                        <span className="text-[11px] text-slate-400 truncate max-w-full">
+                          {m.role || 'Member'}
+                        </span>
+                        {m.family_role && (
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
+                            m.family_role === 'Parent' ? 'bg-amber-100 text-amber-800' :
+                            m.family_role === 'Child' ? 'bg-emerald-100 text-emerald-800' :
+                            m.family_role === 'Elder' ? 'bg-purple-100 text-purple-800' :
+                            'bg-slate-100 text-slate-700'
+                          }`}>
+                            {m.family_role === 'Parent' ? '👑 Parent' :
+                             m.family_role === 'Child' ? '🎒 Child' :
+                             m.family_role === 'Elder' ? '👓 Elder' : m.family_role}
+                          </span>
+                        )}
+                      </div>
                       {m.mobile_number && (
                         <span className="text-[10px] text-indigo-600 font-bold font-mono truncate max-w-full mt-0.5">
                           📞 {m.mobile_number}
@@ -351,8 +393,12 @@ export const HomePage: React.FC<HomePageProps> = ({
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
           currentUser={currentUser}
-          onSettingsUpdated={(updatedName) => {
+          noticeboardMessage={noticeboardMessage}
+          onSettingsUpdated={(updatedName, updatedNotice) => {
             onShowToast(`Home settings updated successfully! Welcome to ${updatedName}.`);
+            if (updatedNotice !== undefined && onUpdateNoticeboard) {
+              onUpdateNoticeboard(updatedNotice);
+            }
             if (onRefresh) onRefresh();
           }}
         />

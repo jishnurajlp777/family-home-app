@@ -14,6 +14,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
   // Inputs
   const [mobileNumber, setMobileNumber] = useState<string>('');
+  const [pin, setPin] = useState<string>('');
+  const [isSettingUpPin, setIsSettingUpPin] = useState<boolean>(false);
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
@@ -33,6 +35,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     setMode(newMode);
     setError(null);
     setMobileNumber('');
+    setPin('');
+    setIsSettingUpPin(false);
     setEmail('');
     setPassword('');
     setConfirmPassword('');
@@ -64,21 +68,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     try {
       if (mode === 'member') {
         const cleanPhone = mobileNumber.trim();
+        const cleanPin = pin.trim();
         if (!cleanPhone) {
           throw new Error('Please enter your registered mobile number.');
         }
-        const user = await FamilyService.loginMember(cleanPhone);
+        if (!cleanPin) {
+          throw new Error('Please enter your 4-digit PIN.');
+        }
+        const user = await FamilyService.loginMember(cleanPhone, cleanPin);
+        if (user.requirePinSetup) {
+          setIsSettingUpPin(true);
+          setError('First time setup: Please enter a 4-digit PIN for your personal room.');
+          return;
+        }
         onLoginSuccess(user);
       } else if (mode === 'home') {
         const cleanEmail = email.trim().toLowerCase();
         const cleanPass = password.trim();
-
-        // Check if master password 2000 is entered
-        if (cleanPass === '2000' || (cleanEmail === 'superadmin' && cleanPass === '2000')) {
-          const user = await FamilyService.loginSuperAdmin('2000');
-          onLoginSuccess(user);
-          return;
-        }
 
         if (!cleanEmail) {
           throw new Error('Please enter your home email.');
@@ -207,28 +213,63 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
           {/* Member Login Mode */}
           {mode === 'member' && (
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 ml-1">
-                Registered Mobile Number
-              </label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 text-sm">
-                  📞
-                </span>
-                <input
-                  type="tel"
-                  name="member_mobile_input"
-                  data-testid="login-input-mobile"
-                  value={mobileNumber}
-                  onChange={(e) => {
-                    setMobileNumber(e.target.value);
-                    setError(null);
-                  }}
-                  placeholder="Enter your registered mobile number"
-                  autoComplete="off"
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-2xl text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none transition shadow-2xs"
-                  autoFocus
-                />
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 ml-1">
+                  Registered Mobile Number
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 text-sm">
+                    📞
+                  </span>
+                  <input
+                    type="tel"
+                    name="member_mobile_input"
+                    data-testid="login-input-mobile"
+                    value={mobileNumber}
+                    onChange={(e) => {
+                      setMobileNumber(e.target.value);
+                      setError(null);
+                    }}
+                    placeholder="Enter your registered mobile number"
+                    autoComplete="off"
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-2xl text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none transition shadow-2xs"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5 ml-1">
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                    {isSettingUpPin ? 'Create 4-Digit Member PIN' : '4-Digit Member PIN'}
+                  </label>
+                  <span className="text-[10px] text-indigo-600 font-bold">🔒 PIN Protected</span>
+                </div>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 text-sm">
+                    🔢
+                  </span>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    name="member_pin_input"
+                    data-testid="login-input-pin"
+                    value={pin}
+                    onChange={(e) => {
+                      setPin(e.target.value);
+                      setError(null);
+                    }}
+                    placeholder={isSettingUpPin ? 'Choose 4 digits (e.g. 1234)' : 'Enter your 4-digit PIN'}
+                    autoComplete="off"
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-2xl text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none transition shadow-2xs tracking-widest"
+                  />
+                </div>
+                {isSettingUpPin && (
+                  <p className="text-[11px] text-indigo-700 bg-indigo-50 p-2 rounded-xl mt-1.5 border border-indigo-200 font-medium">
+                    ✨ First-time sign in! Enter the 4-digit PIN you want to use for your personal room sanctuary.
+                  </p>
+                )}
               </div>
             </div>
           )}

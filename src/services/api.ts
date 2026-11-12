@@ -40,7 +40,10 @@ export class FamilyService {
       return envUrl.trim().replace(/\/$/, '');
     }
 
-    if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    if (typeof window !== 'undefined' && window.location) {
+      if (window.location.protocol === 'capacitor:' || (window as any).Capacitor?.isNativePlatform?.()) {
+        return 'http://10.0.2.2:3000';
+      }
       const origin = window.location.origin;
       const host = window.location.hostname;
       if (host && host !== 'localhost' && host !== '127.0.0.1' && !host.includes('github.io')) {
@@ -76,12 +79,12 @@ export class FamilyService {
       if (host && host.includes('github.io')) {
         return false;
       }
-      // Capacitor mobile WebView has no local backend server
+      // Capacitor mobile WebView connects to live backend
       if (window.location.protocol === 'capacitor:' || (window as any).Capacitor?.isNativePlatform?.()) {
-        return false;
+        return true;
       }
-      // Localhost / 127.0.0.1 in development with active server / proxy
-      if (host === 'localhost' || host === '127.0.0.1') {
+      // Localhost / 127.0.0.1 or standard domains
+      if (host === 'localhost' || host === '127.0.0.1' || host) {
         return true;
       }
     }
@@ -511,7 +514,7 @@ export class FamilyService {
   }
 
   // Offline registered homes cache helpers
-  private static getRegisteredHomesOffline(): Array<{ id: string; name: string; email: string; password?: string; created_at: string }> {
+  private static getRegisteredHomesOffline(): Array<{ id: string; name: string; email: string; password?: string; created_at: string; noticeboard?: string }> {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_OFFLINE_HOMES);
       if (saved) return JSON.parse(saved);
@@ -714,16 +717,12 @@ export class FamilyService {
     throw new Error('Invalid home email or password. Please verify your credentials or register.');
   }
 
-  // Dedicated Member Login (via Registered Mobile Number)
-  public static async loginMember(mobileNumber: string): Promise<AuthUser> {
+  // Dedicated Member Login (via Registered Mobile Number + 4-Digit PIN)
+  public static async loginMember(mobileNumber: string, pin?: string): Promise<AuthUser> {
     const cleanPhone = String(mobileNumber || '').trim();
+    const cleanPin = String(pin || '').trim();
     if (!cleanPhone) {
       throw new Error('Please enter your registered mobile number.');
-    }
-
-    // Super Admin master check (hidden)
-    if (cleanPhone === '2000') {
-      return this.loginSuperAdmin('2000');
     }
 
     // 1. Server API Call (if live server endpoint is configured)
@@ -732,26 +731,40 @@ export class FamilyService {
         const res = await fetch(`${this.getApiBase()}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mobile_number: cleanPhone }),
+          body: JSON.stringify({ mobile_number: cleanPhone, pin: cleanPin }),
         });
 
-        if (res.ok) {
-          this.isServerMode = true;
-          const data = await res.json();
-          const user: AuthUser = {
-            token: data.token,
-            role: 'member',
-            name: data.name,
-            mobile_number: data.mobile_number,
-            memberId: data.memberId,
-            homeId: data.homeId,
-            homeName: data.homeName,
-            member: data.member,
-          };
-          this.setCurrentUser(user);
-          return user;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || 'Authentication failed. Please verify credentials.');
         }
-      } catch {
+
+        this.isServerMode = true;
+        if (data.requirePinSetup) {
+          return {
+            role: 'member',
+            name: data.name || 'Family Member',
+            mobile_number: cleanPhone,
+            requirePinSetup: true,
+          };
+        }
+
+        const user: AuthUser = {
+          token: data.token,
+          role: 'member',
+          name: data.name,
+          mobile_number: data.mobile_number,
+          memberId: data.memberId,
+          homeId: data.homeId,
+          homeName: data.homeName,
+          member: data.member,
+        };
+        this.setCurrentUser(user);
+        return user;
+      } catch (e: any) {
+        if (e.message && !e.message.includes('fetch')) {
+          throw e;
+        }
         this.isServerMode = false;
       }
     }
@@ -762,6 +775,9 @@ export class FamilyService {
       const members = await this.getAll(h.id);
       const matched = members.find((m) => String(m.mobile_number || '').trim() === cleanPhone);
       if (matched) {
+        if (matched.pin && cleanPin && matched.pin !== cleanPin) {
+          throw new Error('Incorrect 4-digit PIN. Please try again.');
+        }
         const user: AuthUser = {
           token: 'tok_member_' + matched.id,
           role: 'member',
@@ -788,12 +804,13 @@ export class FamilyService {
     return this.loginMember(identifier);
   }
 
-  // Update Home Profile Settings (Home Name & Password change)
+  // Update Home Profile Settings (Home Name, Noticeboard & Password change)
   public static async updateHomeProfile(
     homeName?: string,
     currentPassword?: string,
-    newPassword?: string
-  ): Promise<{ success: boolean; homeName: string }> {
+    newPassword?: string,
+    noticeboard?: string
+  ): Promise<{ success: boolean; homeName: string; noticeboard?: string }> {
     const user = this.getCurrentUser();
     if (!user || user.role !== 'admin') {
       throw new Error('Home access required.');
@@ -807,6 +824,7 @@ export class FamilyService {
     if (homeName && homeName.trim()) payload.home_name = homeName.trim();
     if (currentPassword && currentPassword.trim()) payload.current_password = currentPassword.trim();
     if (newPassword && newPassword.trim()) payload.new_password = newPassword.trim();
+    if (noticeboard !== undefined) payload.noticeboard = noticeboard.trim();
 
     try {
       const res = await fetch(`${this.getApiBase()}/api/homes/profile`, {
@@ -834,7 +852,11 @@ export class FamilyService {
           this.saveRegisteredHomesOffline(offlineHomes);
         }
 
-        return { success: true, homeName: updatedUser.homeName || 'Our Home' };
+        return {
+          success: true,
+          homeName: updatedUser.homeName || 'Our Home',
+          noticeboard: data.noticeboard || payload.noticeboard,
+        };
       } else {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to update home settings.');
@@ -857,6 +879,9 @@ export class FamilyService {
       if (payload.home_name) {
         offlineHomes[hIdx].name = payload.home_name;
       }
+      if (payload.noticeboard !== undefined) {
+        offlineHomes[hIdx].noticeboard = payload.noticeboard;
+      }
       this.saveRegisteredHomesOffline(offlineHomes);
     }
 
@@ -866,7 +891,11 @@ export class FamilyService {
       name: payload.home_name || user.name,
     };
     this.setCurrentUser(updatedUser);
-    return { success: true, homeName: updatedUser.homeName || 'Our Home' };
+    return {
+      success: true,
+      homeName: updatedUser.homeName || 'Our Home',
+      noticeboard: payload.noticeboard,
+    };
   }
 
   public static logout(): void {
@@ -1319,5 +1348,55 @@ export class FamilyService {
     }
 
     return true;
+  }
+
+  // Delta Sync: Check for updates without downloading entire database
+  public static async syncWithServer(since: number = 0): Promise<{
+    hasChanges: boolean;
+    members?: FamilyMember[];
+    activeCall?: ActiveCall | null;
+    noticeboard?: string;
+    serverTime: number;
+  }> {
+    if (!this.hasLiveServerEndpoint()) {
+      return { hasChanges: false, serverTime: Date.now() };
+    }
+    try {
+      const res = await fetch(`${this.getApiBase()}/api/sync?since=${since}`, {
+        headers: this.getHeaders(),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {}
+    return { hasChanges: false, serverTime: Date.now() };
+  }
+
+  // Real-Time Event Stream Listener via Server-Sent Events (SSE)
+  public static subscribeEventsStream(onEvent: (event: any) => void): () => void {
+    const user = this.getCurrentUser();
+    const homeId = this.getActiveHomeId();
+    if (!this.hasLiveServerEndpoint() || !homeId || typeof EventSource === 'undefined') {
+      return () => {};
+    }
+
+    try {
+      const token = user?.token || '';
+      const url = `${this.getApiBase()}/api/events/stream?home_id=${encodeURIComponent(homeId)}&token=${encodeURIComponent(token)}`;
+      const eventSource = new EventSource(url);
+
+      eventSource.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          onEvent(data);
+        } catch {}
+      };
+
+      return () => {
+        eventSource.close();
+      };
+    } catch {
+      return () => {};
+    }
   }
 }

@@ -228,9 +228,21 @@ export const FamilyCallingModal: React.FC<FamilyCallingModalProps> = ({
 
     signalPollTimerRef.current = setInterval(pollSignals, 1500);
 
+    // Instant SSE signal listener for zero-latency peer connection handshake
+    const unsubscribeSSE = FamilyService.subscribeEventsStream((event) => {
+      if (!isMounted || !callSession) return;
+      if (event.type === 'call_signal' && event.callId === callSession.id && event.signal) {
+        if (event.signal.timestamp > lastSignalTimeRef.current) {
+          lastSignalTimeRef.current = event.signal.timestamp;
+        }
+        handleIncomingSignal(event.signal);
+      }
+    });
+
     return () => {
       isMounted = false;
       if (signalPollTimerRef.current) clearInterval(signalPollTimerRef.current);
+      unsubscribeSSE();
     };
   }, [callSession?.id, callSession?.status, isJoined, setupLocalAudio]);
 

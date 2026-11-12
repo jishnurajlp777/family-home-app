@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import { FamilyMember, NewMemberInput, AuthUser, Home, ActiveCall } from './types/member';
 import { FamilyService } from './services/api';
@@ -25,6 +25,8 @@ export const App: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [isCallModalOpen, setIsCallModalOpen] = useState<boolean>(false);
+  const [noticeboard, setNoticeboard] = useState<string>('');
+  const lastSyncRef = useRef<number>(0);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -88,11 +90,71 @@ export const App: React.FC = () => {
 
   // Real-time synchronization loop across devices and apps
   useEffect(() => {
-    const syncTimer = setInterval(async () => {
+    const handleCall = (call: ActiveCall | null, auth: AuthUser) => {
+      if (call && call.status !== 'ended') {
+        const myId = auth.memberId || (auth.role === 'admin' ? 'admin' : 'member');
+        const isTarget = call.target_id === 'all' || call.target_id === myId || call.caller_id === myId;
+        if (isTarget) {
+          setActiveCall(call);
+          if (call.status === 'ringing') {
+            setIsCallModalOpen(true);
+          }
+        }
+      } else {
+        setActiveCall((prev) => {
+          if (prev && prev.status !== 'ended') {
+            setIsCallModalOpen(false);
+            return null;
+          }
+          return prev;
+        });
+      }
+    };
+
+    const doSync = async () => {
       try {
         const auth = FamilyService.getCurrentUser();
         if (!auth || (!auth.homeId && auth.role !== 'super_admin')) return;
 
+        // Efficient Delta Sync: fetch only changed records & real-time server time
+        const syncRes = await FamilyService.syncWithServer(lastSyncRef.current);
+        if (syncRes && syncRes.serverTime) {
+          lastSyncRef.current = syncRes.serverTime;
+          if (syncRes.noticeboard !== undefined) {
+            setNoticeboard(syncRes.noticeboard);
+          }
+          if (syncRes.hasChanges && syncRes.members) {
+            const deduplicated = FamilyService.deduplicateMembers(syncRes.members);
+            setMembers((prev) => {
+              if (JSON.stringify(prev) !== JSON.stringify(deduplicated)) {
+                return deduplicated;
+              }
+              return prev;
+            });
+
+            // Sync active user if their profile was updated elsewhere
+            if (auth && auth.role === 'member') {
+              const me = deduplicated.find((m) => m.id === auth.memberId || m.mobile_number === auth.mobile_number);
+              if (me && (me.name !== auth.name || me.mobile_number !== auth.mobile_number)) {
+                const updatedAuth: AuthUser = {
+                  ...auth,
+                  name: me.name,
+                  mobile_number: me.mobile_number,
+                  member: me,
+                };
+                FamilyService.setCurrentUser(updatedAuth);
+                setCurrentUser(updatedAuth);
+              }
+            }
+          }
+
+          if (syncRes.activeCall !== undefined) {
+            handleCall(syncRes.activeCall, auth);
+          }
+          return;
+        }
+
+        // Offline / Fallback mode
         const latest = await FamilyService.getAll(auth.homeId);
         const deduplicated = FamilyService.deduplicateMembers(latest);
         setMembers((prev) => {
@@ -102,44 +164,27 @@ export const App: React.FC = () => {
           return prev;
         });
 
-        // Sync active user if their profile was updated elsewhere
-        if (auth && auth.role === 'member') {
-          const me = deduplicated.find((m) => m.id === auth.memberId || m.mobile_number === auth.mobile_number);
-          if (me && (me.name !== auth.name || me.mobile_number !== auth.mobile_number)) {
-            const updatedAuth: AuthUser = {
-              ...auth,
-              name: me.name,
-              mobile_number: me.mobile_number,
-              member: me,
-            };
-            FamilyService.setCurrentUser(updatedAuth);
-            setCurrentUser(updatedAuth);
-          }
-        }
-
-        // Real-Time Internet Calling check
         const call = await FamilyService.getActiveCall();
-        if (call && call.status !== 'ended') {
-          const myId = auth.memberId || (auth.role === 'admin' ? 'admin' : 'member');
-          const isTarget = call.target_id === 'all' || call.target_id === myId || call.caller_id === myId;
-          if (isTarget) {
-            setActiveCall(call);
-            // If caller or callee ringing, automatically open modal
-            if (call.status === 'ringing') {
-              setIsCallModalOpen(true);
-            }
-          }
-        } else {
-          setActiveCall((prev) => {
-            if (prev && prev.status !== 'ended') {
-              setIsCallModalOpen(false);
-              return null;
-            }
-            return prev;
-          });
-        }
+        handleCall(call, auth);
       } catch {}
-    }, 2500);
+    };
+
+    // SSE Stream for instant push events
+    const unsubscribeSSE = FamilyService.subscribeEventsStream((event) => {
+      const auth = FamilyService.getCurrentUser();
+      if (!auth) return;
+      if (event.type === 'call_update' && event.call) {
+        handleCall(event.call, auth);
+      } else if (event.type === 'call_ended') {
+        setActiveCall(null);
+        setIsCallModalOpen(false);
+      } else {
+        lastSyncRef.current = 0;
+        doSync();
+      }
+    });
+
+    const syncTimer = setInterval(doSync, 3000);
 
     const handleStorageChange = () => {
       refreshMembers();
@@ -148,6 +193,7 @@ export const App: React.FC = () => {
 
     return () => {
       clearInterval(syncTimer);
+      unsubscribeSSE();
       window.removeEventListener('storage', handleStorageChange);
     };
   }, [refreshMembers]);
@@ -492,6 +538,8 @@ export const App: React.FC = () => {
           onUpdateLocation={handleUpdateLocation}
           onTriggerCall={handleTriggerCall}
           activeCall={activeCall}
+          noticeboardMessage={noticeboard}
+          onUpdateNoticeboard={(msg) => setNoticeboard(msg)}
         />
       )}
 

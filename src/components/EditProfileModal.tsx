@@ -30,7 +30,9 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 }) => {
   const [name, setName] = useState(member.name);
   const [mobileNumber, setMobileNumber] = useState(member.mobile_number || '');
+  const [pin, setPin] = useState('');
   const [role, setRole] = useState(member.role || '');
+  const [familyRole, setFamilyRole] = useState(member.family_role || 'Member');
   const [caricatureKey, setCaricatureKey] = useState<CaricatureType>(member.caricature_key);
   const [imageUrl, setImageUrl] = useState<string>(member.image_url || '');
   const [bio, setBio] = useState(member.bio || '');
@@ -115,10 +117,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      const updates: Partial<FamilyMember> = {
+      const updates: Partial<FamilyMember> & { pin?: string } = {
         name: cleanName,
         mobile_number: cleanPhone,
         role: role.trim() || member.role,
+        family_role: familyRole,
         caricature_key: caricatureKey,
         bio: bio.trim() || member.bio,
         quote: quote.trim() || member.quote,
@@ -126,6 +129,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         room_title: roomTitle.trim() || member.room_title,
         room_desc: roomDesc.trim() || member.room_desc,
       };
+
+      if (pin.trim()) {
+        updates.pin = pin.trim();
+      }
 
       // Handle image updates explicitly so existing photos are never lost
       if (imageUrl !== member.image_url) {
@@ -198,19 +205,63 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
             </div>
           </div>
 
-          {/* Mobile Number */}
+          {/* Mobile Number & 4-Digit Room PIN */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Mobile Number <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="tel"
+                value={mobileNumber}
+                onChange={(e) => setMobileNumber(e.target.value)}
+                placeholder="e.g. 9876543210"
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-sm font-medium outline-hidden"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Change 4-Digit PIN
+              </label>
+              <input
+                type="password"
+                maxLength={6}
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                placeholder="Leave blank to keep current PIN"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-sm font-medium outline-hidden tracking-widest"
+              />
+            </div>
+          </div>
+
+          {/* Family Role Hierarchy */}
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Mobile Number (Used for Login) <span className="text-rose-500">*</span>
+              Family Role
             </label>
-            <input
-              type="tel"
-              value={mobileNumber}
-              onChange={(e) => setMobileNumber(e.target.value)}
-              placeholder="e.g. 9876543210"
-              required
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-sm font-medium outline-hidden"
-            />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { key: 'Parent / Guardian', icon: '👑', label: 'Parent' },
+                { key: 'Child / Youth', icon: '🎒', label: 'Child' },
+                { key: 'Senior', icon: '👓', label: 'Elder' },
+                { key: 'Member', icon: '🏡', label: 'Member' },
+              ].map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => setFamilyRole(r.key)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    familyRole === r.key
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-xs'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>{r.icon}</span>
+                  <span className="truncate">{r.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Profile Photo / Avatar (Add / Remove) */}
